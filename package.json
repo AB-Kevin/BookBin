@@ -1,0 +1,21 @@
+{
+  "name": "bookbin",
+  "version": "1.0.0",
+  "description": "Inventory tracker and invoice generator",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^32.0.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true,
+    "electron@32.3.3": true
+  }
+}

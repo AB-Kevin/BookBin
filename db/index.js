@@ -1,0 +1,40 @@
+const path = require('path');
+const fs = require('fs');
+const Database = require('better-sqlite3');
+const { app } = require('electron');
+
+// Adds a column to an existing table if it isn't already there. CREATE TABLE
+// IF NOT EXISTS in schema.sql only helps on a fresh database — a table that
+// already exists from an earlier version of the app needs its new columns
+// added explicitly, and ALTER TABLE ADD COLUMN errors if run twice.
+function ensureColumn(db, table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function migrate(db) {
+  ensureColumn(db, 'incoming_invoices', 'paid', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'incoming_invoices', 'received', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+/**
+ * Opens (creating if necessary) the app's SQLite database in the user's
+ * per-app data directory and applies schema.sql, which is safe to run on
+ * every launch since every statement is idempotent (CREATE ... IF NOT EXISTS).
+ */
+function initDatabase() {
+  const dbPath = path.join(app.getPath('userData'), 'bookbin.db');
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  db.exec(schema);
+  migrate(db);
+
+  return db;
+}
+
+module.exports = { initDatabase };
