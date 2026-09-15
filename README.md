@@ -68,6 +68,12 @@ GitHub Actions then builds the Windows `.exe` (on a Windows runner) and the
 Mac `.dmg`/`.zip` (on a macOS runner) and publishes both to the GitHub Release
 for that tag — no local Mac needed, this can be run entirely from Windows.
 
+The sidebar footer shows the installed version and checks that release feed
+on launch (and on demand via "Check for updates"). On Windows it downloads
+and installs the update in place; on Mac — only ad-hoc signed, not enough for
+a silent install — it instead opens the GitHub release page to grab the new
+`.dmg` by hand.
+
 ## Project layout
 
 ```
@@ -76,7 +82,9 @@ preload.js             contextBridge surface exposed to the renderer as window.a
 db/                    SQLite schema + connection setup
 ipc/                   One module per domain (items, vendors, customers,
                         incoming/outgoing invoices, settings, dashboard) —
-                        all DB access happens here, in the main process
+                        all DB access happens here, in the main process.
+                        updates.js is the exception — no DB, just wraps
+                        electron-updater for the sidebar's update check.
 renderer/              Plain HTML/CSS/JS UI, no framework, no build step
   screens/             One file per screen
   invoice-template.js  Builds the printable invoice HTML (shared by PDF export)

@@ -9,6 +9,7 @@ const registerIncomingInvoices = require('./ipc/incomingInvoices');
 const registerOutgoingInvoices = require('./ipc/outgoingInvoices');
 const registerSettings = require('./ipc/settings');
 const registerDashboard = require('./ipc/dashboard');
+const registerUpdates = require('./ipc/updates');
 
 let mainWindow;
 
@@ -40,6 +41,7 @@ app.whenReady().then(() => {
   registerOutgoingInvoices(ipcMain, db);
   registerSettings(ipcMain, db);
   registerDashboard(ipcMain, db);
+  registerUpdates(ipcMain, () => mainWindow);
 
   createWindow();
 

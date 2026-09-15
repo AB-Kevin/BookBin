@@ -136,6 +136,54 @@ body {
 .nav-link:hover { background: rgba(255,255,255,0.08); }
 .nav-link.active { background: var(--primary); color: #fff; }
 
+#sidebar-footer {
+  margin-top: auto;
+  padding: 10px 14px 14px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#sidebar.collapsed #sidebar-footer {
+  padding: 10px 6px 14px;
+  align-items: center;
+}
+
+#sidebar.collapsed #sidebar-footer .app-version,
+#sidebar.collapsed #sidebar-footer .update-row {
+  display: none;
+}
+
+.app-version {
+  font-size: 11px;
+  color: var(--sidebar-text);
+  opacity: 0.7;
+}
+
+.update-row {
+  font-size: 12px;
+}
+
+.update-row.clickable { cursor: pointer; }
+.update-row.clickable:hover { color: #fff; }
+.update-row.error { color: #f87171; }
+
+.update-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--sidebar-text);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.update-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.update-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.update-btn.primary:hover { background: var(--primary-dark); }
+
 #content {
   flex: 1;
   overflow-y: auto;

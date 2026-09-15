@@ -36,4 +36,16 @@ contextBridge.exposeInMainWorld('api', {
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
   },
+  updates: {
+    getVersion: () => ipcRenderer.invoke('updates:getVersion'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    quitAndInstall: () => ipcRenderer.invoke('updates:quitAndInstall'),
+    openReleasesPage: () => ipcRenderer.invoke('updates:openReleasesPage'),
+    onStatus: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('updates:status', listener);
+      return () => ipcRenderer.removeListener('updates:status', listener);
+    },
+  },
 });
