@@ -54,6 +54,20 @@ source, so you don't need Python or Visual Studio Build Tools installed.
 - **Settings** — your company name/address (shown on PDF invoices),
   invoice number prefixes/counters, and the low-stock threshold.
 
+## Releasing (both platforms, from either OS)
+
+Releases are automated via [.github/workflows/release.yml](.github/workflows/release.yml).
+Bump the version, commit, and push the tag `npm version` creates:
+
+```
+npm version patch   # or: minor / major
+git push --follow-tags
+```
+
+GitHub Actions then builds the Windows `.exe` (on a Windows runner) and the
+Mac `.dmg`/`.zip` (on a macOS runner) and publishes both to the GitHub Release
+for that tag — no local Mac needed, this can be run entirely from Windows.
+
 ## Project layout
 
 ```
