@@ -22,17 +22,19 @@ Your data lives in a single SQLite file at:
 
 ### If `npm install` fails to build the SQLite native module
 
-`better-sqlite3` is a native module and needs to match Electron's Node ABI,
-not your system Node's. If `npm start` errors on launch (or `npm install`
-complains about `node-gyp`/Python), run:
+`better-sqlite3` ships prebuilt N-API binaries (win/mac/linux) directly in the
+package as of v12+, so a plain `npm install` normally needs no compiler at
+all. If you're ever on a platform/arch it didn't prebuild for and `npm start`
+errors on launch, fall back to compiling it yourself against Electron's
+headers:
 
 ```
 npm install --save-dev @electron/rebuild
 npx electron-rebuild -f -w better-sqlite3
 ```
 
-That pulls a prebuilt binary for Electron's ABI instead of compiling from
-source, so you don't need Python or Visual Studio Build Tools installed.
+That requires Python and a C++ toolchain (Visual Studio Build Tools on
+Windows) — not needed in the common case above.
 
 ## What it does
 
