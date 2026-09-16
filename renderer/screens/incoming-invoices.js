@@ -21,11 +21,35 @@ async function renderList(container) {
 
   function render() {
     const rows = sortedRows(invoices, sortState);
+
+    const now = new Date();
+    const oneMonthAgo = new Date(now);
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const sixMonthsAgo = new Date(now);
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const totalSince = (cutoff) => invoices
+      .filter((inv) => inv.invoice_date && new Date(inv.invoice_date) >= cutoff)
+      .reduce((sum, inv) => sum + Number(inv.total || 0), 0);
+
+    const lastMonthTotal = totalSince(oneMonthAgo);
+    const last6MonthsTotal = totalSince(sixMonthsAgo);
+
     container.innerHTML = `
       <div class="page-header">
         <h1>Incoming Invoices</h1>
         <button class="btn primary" id="new-invoice">+ New Invoice</button>
       </div>
+      <section class="card stats-row">
+        <div class="stat">
+          <div class="stat-label">Last Month Total</div>
+          <div class="stat-value">${formatMoney(lastMonthTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Last 6 Months Total</div>
+          <div class="stat-value">${formatMoney(last6MonthsTotal)}</div>
+        </div>
+      </section>
       <section class="card">
         ${invoices.length === 0
           ? '<p class="muted">No incoming invoices yet.</p>'

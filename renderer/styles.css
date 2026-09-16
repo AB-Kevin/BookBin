@@ -225,6 +225,25 @@ h2 { font-size: 15px; margin: 0 0 12px; color: var(--text); }
   gap: 20px;
 }
 
+.stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

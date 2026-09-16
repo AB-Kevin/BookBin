@@ -13,11 +13,20 @@ window.Screens.items = async function renderItems(container) {
 
   function render() {
     const rows = sortedRows(items, sortState);
+    const totalOnHand = items
+      .filter((item) => item.is_inventory)
+      .reduce((sum, item) => sum + Number(item.quantity_on_hand || 0), 0);
     container.innerHTML = `
       <div class="page-header">
         <h1>Items</h1>
         <button class="btn primary" id="new-item">+ New Item</button>
       </div>
+      <section class="card stats-row">
+        <div class="stat">
+          <div class="stat-label">Total Items In Stock</div>
+          <div class="stat-value">${totalOnHand}</div>
+        </div>
+      </section>
       <section class="card">
         ${items.length === 0
           ? '<p class="muted">No items yet.</p>'
