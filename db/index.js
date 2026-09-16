@@ -1,7 +1,6 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
-const { app } = require('electron');
 
 // Adds a column to an existing table if it isn't already there. CREATE TABLE
 // IF NOT EXISTS in schema.sql only helps on a fresh database — a table that
@@ -20,12 +19,14 @@ function migrate(db) {
 }
 
 /**
- * Opens (creating if necessary) the app's SQLite database in the user's
- * per-app data directory and applies schema.sql, which is safe to run on
- * every launch since every statement is idempotent (CREATE ... IF NOT EXISTS).
+ * Opens (creating if necessary) the app's SQLite database inside
+ * workspaceDir and applies schema.sql, which is safe to run on every launch
+ * since every statement is idempotent (CREATE ... IF NOT EXISTS). workspaceDir
+ * defaults to the app's per-machine userData folder, but may instead be a
+ * synced folder (e.g. OneDrive) shared with another device.
  */
-function initDatabase() {
-  const dbPath = path.join(app.getPath('userData'), 'bookbin.db');
+function initDatabase(workspaceDir) {
+  const dbPath = path.join(workspaceDir, 'bookbin.db');
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');

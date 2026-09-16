@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { initDatabase } = require('./db');
+const { getWorkspaceDir, ensureWorkspaceDirs } = require('./workspace');
 
 const registerItems = require('./ipc/items');
 const registerVendors = require('./ipc/vendors');
@@ -10,6 +11,7 @@ const registerOutgoingInvoices = require('./ipc/outgoingInvoices');
 const registerSettings = require('./ipc/settings');
 const registerDashboard = require('./ipc/dashboard');
 const registerUpdates = require('./ipc/updates');
+const registerWorkspace = require('./ipc/workspace');
 
 let mainWindow;
 
@@ -32,16 +34,19 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  const db = initDatabase();
+  const workspaceDir = getWorkspaceDir();
+  ensureWorkspaceDirs(workspaceDir);
+  const db = initDatabase(workspaceDir);
 
   registerItems(ipcMain, db);
   registerVendors(ipcMain, db);
   registerCustomers(ipcMain, db);
   registerIncomingInvoices(ipcMain, db);
-  registerOutgoingInvoices(ipcMain, db);
-  registerSettings(ipcMain, db);
+  registerOutgoingInvoices(ipcMain, db, workspaceDir);
+  registerSettings(ipcMain, db, workspaceDir);
   registerDashboard(ipcMain, db);
   registerUpdates(ipcMain, () => mainWindow);
+  registerWorkspace(ipcMain, workspaceDir);
 
   createWindow();
 

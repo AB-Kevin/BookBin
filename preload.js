@@ -32,6 +32,12 @@ contextBridge.exposeInMainWorld('api', {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (data) => ipcRenderer.invoke('settings:update', data),
+    chooseLogo: () => ipcRenderer.invoke('settings:chooseLogo'),
+    removeLogo: () => ipcRenderer.invoke('settings:removeLogo'),
+  },
+  workspace: {
+    get: () => ipcRenderer.invoke('workspace:get'),
+    choose: () => ipcRenderer.invoke('workspace:choose'),
   },
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),

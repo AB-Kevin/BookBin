@@ -3,8 +3,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { buildInvoiceHtml } = require('../renderer/invoice-template');
+const { logoDir } = require('../workspace');
 
-module.exports = function registerOutgoingInvoices(ipcMain, db) {
+module.exports = function registerOutgoingInvoices(ipcMain, db, workspaceDir) {
   const listStmt = db.prepare(`
     SELECT oi.*, c.name AS customer_name
     FROM outgoing_invoices oi
@@ -184,10 +185,18 @@ module.exports = function registerOutgoingInvoices(ipcMain, db) {
     return { ok: true };
   });
 
+  // company_logo_path is stored as a filename relative to <workspace>/logo;
+  // the template needs a real absolute path to build a file:// src from.
+  function resolveLogoPath(company) {
+    if (!company || !company.company_logo_path) return company;
+    if (path.isAbsolute(company.company_logo_path)) return company;
+    return { ...company, company_logo_path: path.join(logoDir(workspaceDir), company.company_logo_path) };
+  }
+
   ipcMain.handle('outgoingInvoices:exportPdf', async (event, id) => {
     const invoice = getFullInvoice(id);
     if (!invoice) throw new Error('Invoice not found');
-    const company = getSettingsStmt.get();
+    const company = resolveLogoPath(getSettingsStmt.get());
     const html = buildInvoiceHtml({ invoice, company });
 
     const tempPath = path.join(os.tmpdir(), `bookbin-invoice-${id}-${Date.now()}.html`);

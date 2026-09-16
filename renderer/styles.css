@@ -351,6 +351,34 @@ option.new-entry { color: var(--primary); font-style: italic; }
   gap: 16px;
 }
 
+.logo-picker {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.logo-preview {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.logo-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.logo-picker-actions {
+  display: flex;
+  gap: 8px;
+}
+
 #lines-table input,
 #lines-table select { margin-top: 0; }
 #lines-table td { vertical-align: middle; }
