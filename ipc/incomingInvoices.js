@@ -1,4 +1,43 @@
-module.exports = function registerIncomingInvoices(ipcMain, db) {
+const { dialog, shell, BrowserWindow } = require('electron');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const { attachmentsDir } = require('../workspace');
+
+const ATTACHMENT_FILTERS = [
+  { name: 'Bills', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'] },
+];
+
+module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
+  const dir = attachmentsDir(workspaceDir, 'incoming');
+
+  function removeAttachmentFile(fileName) {
+    if (!fileName || path.isAbsolute(fileName)) return;
+    fs.rmSync(path.join(dir, fileName), { force: true });
+  }
+
+  // Resolves what this save's attachment_path/attachment_name should be:
+  // a newly chosen file replaces (and cleans up) any old one, a remove
+  // request clears it, and otherwise the existing attachment carries over.
+  function resolveAttachment(current, data) {
+    if (data.remove_attachment) {
+      removeAttachmentFile(current?.attachment_path);
+      return { attachment_path: null, attachment_name: null };
+    }
+    if (data.attachment_source_path) {
+      const ext = path.extname(data.attachment_source_path).toLowerCase();
+      const fileName = `${crypto.randomUUID()}${ext}`;
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(data.attachment_source_path, path.join(dir, fileName));
+      removeAttachmentFile(current?.attachment_path);
+      return { attachment_path: fileName, attachment_name: path.basename(data.attachment_source_path) };
+    }
+    return {
+      attachment_path: current?.attachment_path ?? null,
+      attachment_name: current?.attachment_name ?? null,
+    };
+  }
+
   const listStmt = db.prepare(`
     SELECT ii.*, v.name AS vendor_name
     FROM incoming_invoices ii
@@ -19,14 +58,15 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
     ORDER BY l.id
   `);
   const insertInvoiceStmt = db.prepare(`
-    INSERT INTO incoming_invoices (vendor_id, invoice_number, invoice_date, notes, total, paid, received)
-    VALUES (@vendor_id, @invoice_number, @invoice_date, @notes, @total, @paid, @received)
+    INSERT INTO incoming_invoices (vendor_id, invoice_number, invoice_date, notes, total, paid, received, attachment_path, attachment_name)
+    VALUES (@vendor_id, @invoice_number, @invoice_date, @notes, @total, @paid, @received, @attachment_path, @attachment_name)
   `);
   const updateInvoiceStmt = db.prepare(`
     UPDATE incoming_invoices SET
       vendor_id = @vendor_id, invoice_number = @invoice_number,
       invoice_date = @invoice_date, notes = @notes, total = @total,
-      paid = @paid, received = @received
+      paid = @paid, received = @received,
+      attachment_path = @attachment_path, attachment_name = @attachment_name
     WHERE id = @id
   `);
   const setFlagsStmt = db.prepare('UPDATE incoming_invoices SET paid = @paid, received = @received WHERE id = @id');
@@ -56,7 +96,7 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
     return `${settings.incoming_prefix}${settings.incoming_next_number}`;
   }
 
-  function withInvoiceDefaults(data) {
+  function withInvoiceDefaults(data, current) {
     return {
       vendor_id: data.vendor_id || null,
       invoice_number: data.invoice_number && data.invoice_number.trim() ? data.invoice_number.trim() : null,
@@ -64,6 +104,7 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
       notes: data.notes || null,
       paid: data.paid ? 1 : 0,
       received: data.received ? 1 : 0,
+      ...resolveAttachment(current, data),
     };
   }
 
@@ -104,15 +145,24 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
     }
   }
 
+  // attachment_path is stored as a filename inside <workspace>/attachments/incoming
+  // so it stays portable across devices sharing a workspace folder.
+  function withAttachmentUrl(row) {
+    if (!row) return row;
+    if (!row.attachment_path) return { ...row, attachment_url: null };
+    const absPath = path.isAbsolute(row.attachment_path) ? row.attachment_path : path.join(dir, row.attachment_path);
+    return { ...row, attachment_url: `file://${absPath.replace(/\\/g, '/')}` };
+  }
+
   function getFullInvoice(id) {
-    const invoice = getInvoiceStmt.get(id);
+    const invoice = withAttachmentUrl(getInvoiceStmt.get(id));
     if (!invoice) return null;
     invoice.lines = getLinesStmt.all(id);
     return invoice;
   }
 
   const createTx = db.transaction((data) => {
-    const header = withInvoiceDefaults(data);
+    const header = withInvoiceDefaults(data, null);
     if (!header.invoice_number) header.invoice_number = nextInvoiceNumber();
     const lines = data.lines || [];
     header.total = computeTotal(lines);
@@ -139,7 +189,8 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
     reverseStockEffects(id);
     deleteLinesStmt.run(id);
 
-    const header = withInvoiceDefaults(data);
+    const current = getInvoiceStmt.get(id);
+    const header = withInvoiceDefaults(data, current);
     if (!header.invoice_number) header.invoice_number = nextInvoiceNumber();
     const lines = data.lines || [];
     header.total = computeTotal(lines);
@@ -161,6 +212,8 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
   });
 
   const deleteTx = db.transaction((id) => {
+    const current = getInvoiceStmt.get(id);
+    removeAttachmentFile(current?.attachment_path);
     reverseStockEffects(id);
     deleteInvoiceStmt.run(id); // cascades to lines
   });
@@ -174,6 +227,22 @@ module.exports = function registerIncomingInvoices(ipcMain, db) {
   ipcMain.handle('incomingInvoices:update', (_e, id, data) => {
     updateTx(id, data);
     return getFullInvoice(id);
+  });
+  ipcMain.handle('incomingInvoices:chooseAttachment', async (event) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(parentWindow, {
+      title: 'Choose Bill Attachment',
+      properties: ['openFile'],
+      filters: ATTACHMENT_FILTERS,
+    });
+    if (canceled || !filePaths.length) return null;
+    return { filePath: filePaths[0], fileName: path.basename(filePaths[0]) };
+  });
+  ipcMain.handle('incomingInvoices:openAttachment', (_e, id) => {
+    const invoice = getInvoiceStmt.get(id);
+    if (!invoice?.attachment_path) return { ok: false };
+    const absPath = path.isAbsolute(invoice.attachment_path) ? invoice.attachment_path : path.join(dir, invoice.attachment_path);
+    return shell.openPath(absPath).then((err) => ({ ok: !err, error: err || null }));
   });
   ipcMain.handle('incomingInvoices:delete', (_e, id) => {
     deleteTx(id);

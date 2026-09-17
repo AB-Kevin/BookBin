@@ -11,6 +11,31 @@ function escapeHtml(value) {
   }[ch]));
 }
 
+// Escapes text and turns http(s)/www URLs into clickable spans. Real <a href>
+// isn't used since clicking one would navigate the app's own BrowserWindow;
+// app.js instead delegates clicks on [data-ext-link] to shell.openExternal.
+function linkify(text) {
+  const str = String(text == null ? '' : text);
+  const urlPattern = /\bhttps?:\/\/[^\s<]+|\bwww\.[^\s<]+/gi;
+  let result = '';
+  let lastIndex = 0;
+  let match;
+  while ((match = urlPattern.exec(str))) {
+    result += escapeHtml(str.slice(lastIndex, match.index));
+    let raw = match[0];
+    let trail = '';
+    while (raw && /[.,;:!?)\]}'"]$/.test(raw)) {
+      trail = raw.slice(-1) + trail;
+      raw = raw.slice(0, -1);
+    }
+    const href = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+    result += `<a href="#" class="ext-link" data-ext-link="${escapeHtml(href)}">${escapeHtml(raw)}</a>${escapeHtml(trail)}`;
+    lastIndex = match.index + match[0].length;
+  }
+  result += escapeHtml(str.slice(lastIndex));
+  return result;
+}
+
 function formatMoney(n) {
   const num = Number(n || 0);
   return `$${num.toFixed(2)}`;
@@ -51,7 +76,61 @@ async function confirmAction(message) {
   return window.confirm(message);
 }
 
-function navigate(path) {
+// A screen with unsaved work registers a guard ({ isDirty, confirmLeave })
+// while it's mounted. navigate() is the single choke point every screen uses
+// to move around (buttons, nav-link clicks, prev/next), so routing all of
+// them through here is what makes the "prompt to save" behavior automatic
+// everywhere instead of needing to be wired into each call site.
+let activeGuard = null;
+
+function setNavigationGuard(guard) {
+  activeGuard = guard;
+}
+
+function clearNavigationGuard() {
+  activeGuard = null;
+}
+
+function hasUnsavedChanges() {
+  return Boolean(activeGuard && activeGuard.isDirty && activeGuard.isDirty());
+}
+
+// Three-way prompt (Save / Discard / keep editing) for leaving a dirty form.
+// Resolves 'save' | 'discard' | 'cancel'; dismissing via the backdrop counts
+// as 'cancel' (stay put) rather than leaving the promise hanging forever.
+function confirmSaveChanges(message) {
+  return new Promise((resolve) => {
+    const modal = showModal(`
+      <h2>Unsaved Changes</h2>
+      <p>${escapeHtml(message || 'This has unsaved changes.')}</p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="discard-btn">Discard</button>
+        <button type="button" class="btn" id="stay-btn">Keep Editing</button>
+        <button type="button" class="btn primary" id="save-btn">Save</button>
+      </div>
+    `);
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      hideModal();
+      resolve(result);
+    };
+    modal.querySelector('#discard-btn').addEventListener('click', () => finish('discard'));
+    modal.querySelector('#stay-btn').addEventListener('click', () => finish('cancel'));
+    modal.querySelector('#save-btn').addEventListener('click', () => finish('save'));
+    modal.parentElement.addEventListener('mousedown', (e) => {
+      if (e.target.classList.contains('modal-backdrop')) finish('cancel');
+    });
+  });
+}
+
+async function navigate(path) {
+  if (activeGuard) {
+    const proceed = await activeGuard.confirmLeave();
+    if (!proceed) return;
+  }
+  activeGuard = null;
   window.location.hash = path;
 }
 
@@ -104,6 +183,7 @@ function wireSortableHeaders(root, sortState, onChange) {
 
 window.Helpers = {
   escapeHtml,
+  linkify,
   formatMoney,
   formatDate,
   todayIso,
@@ -113,6 +193,10 @@ window.Helpers = {
   hideModal,
   confirmAction,
   navigate,
+  setNavigationGuard,
+  clearNavigationGuard,
+  hasUnsavedChanges,
+  confirmSaveChanges,
   createSortState,
   sortedRows,
   sortableHeader,

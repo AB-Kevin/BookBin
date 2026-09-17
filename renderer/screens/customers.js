@@ -37,10 +37,10 @@ window.Screens.customers = async function renderCustomers(container) {
                       <td>${escapeHtml(c.contact_name || '')}</td>
                       <td>${escapeHtml(c.email || '')}</td>
                       <td>${escapeHtml(c.phone || '')}</td>
-                      <td class="actions">
+                      <td class="actions"><div class="actions-row">
                         <button class="btn small" data-edit="${c.id}">Edit</button>
                         <button class="btn small danger" data-delete="${c.id}">Delete</button>
-                      </td>
+                      </div></td>
                     </tr>
                   `)
                   .join('')}

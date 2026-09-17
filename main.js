@@ -12,6 +12,7 @@ const registerSettings = require('./ipc/settings');
 const registerDashboard = require('./ipc/dashboard');
 const registerUpdates = require('./ipc/updates');
 const registerWorkspace = require('./ipc/workspace');
+const registerShell = require('./ipc/shell');
 
 let mainWindow;
 
@@ -41,12 +42,13 @@ app.whenReady().then(() => {
   registerItems(ipcMain, db);
   registerVendors(ipcMain, db);
   registerCustomers(ipcMain, db);
-  registerIncomingInvoices(ipcMain, db);
+  registerIncomingInvoices(ipcMain, db, workspaceDir);
   registerOutgoingInvoices(ipcMain, db, workspaceDir);
   registerSettings(ipcMain, db, workspaceDir);
   registerDashboard(ipcMain, db);
   registerUpdates(ipcMain, () => mainWindow);
   registerWorkspace(ipcMain, workspaceDir);
+  registerShell(ipcMain);
 
   createWindow();
 

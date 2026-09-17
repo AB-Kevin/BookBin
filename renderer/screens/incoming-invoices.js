@@ -73,10 +73,11 @@ async function renderList(container) {
                       <td class="num">${formatMoney(inv.total)}</td>
                       <td class="checkbox-col"><input type="checkbox" data-flag="received" data-id="${inv.id}" ${inv.received ? 'checked' : ''} /></td>
                       <td class="checkbox-col"><input type="checkbox" data-flag="paid" data-id="${inv.id}" ${inv.paid ? 'checked' : ''} /></td>
-                      <td class="actions">
+                      <td class="actions"><div class="actions-row">
+                        ${inv.attachment_path ? `<button class="btn small" data-view-attachment="${inv.id}">📎 View</button>` : ''}
                         <button class="btn small" data-edit="${inv.id}">Edit</button>
                         <button class="btn small danger" data-delete="${inv.id}">Delete</button>
-                      </td>
+                      </div></td>
                     </tr>
                   `)
                   .join('')}
@@ -88,6 +89,9 @@ async function renderList(container) {
     qs('#new-invoice', container).addEventListener('click', () => window.Helpers.navigate('/incoming-invoices/new'));
     qsa('[data-edit]', container).forEach((btn) =>
       btn.addEventListener('click', () => window.Helpers.navigate(`/incoming-invoices/${btn.dataset.edit}`))
+    );
+    qsa('[data-view-attachment]', container).forEach((btn) =>
+      btn.addEventListener('click', () => window.api.incomingInvoices.openAttachment(Number(btn.dataset.viewAttachment)))
     );
     qsa('[data-delete]', container).forEach((btn) =>
       btn.addEventListener('click', async () => {
@@ -122,11 +126,18 @@ async function renderForm(container, invoiceId) {
   const { escapeHtml, formatMoney, todayIso, qs, qsa } = window.Helpers;
   const isEdit = Boolean(invoiceId);
 
-  const [vendors, items, invoice] = await Promise.all([
+  const [vendors, items, invoice, allInvoices] = await Promise.all([
     window.api.vendors.list(),
     window.api.items.list(),
     isEdit ? window.api.incomingInvoices.get(invoiceId) : Promise.resolve(null),
+    window.api.incomingInvoices.list(),
   ]);
+
+  // allInvoices comes back pre-sorted (invoice_date desc, id desc) — the same
+  // order the list screen shows by default — so Previous/Next just walk it.
+  const currentIndex = isEdit ? allInvoices.findIndex((i) => i.id === invoiceId) : -1;
+  const prevInvoice = currentIndex > 0 ? allInvoices[currentIndex - 1] : null;
+  const nextInvoice = currentIndex >= 0 && currentIndex < allInvoices.length - 1 ? allInvoices[currentIndex + 1] : null;
 
   const vendorOptions = (selectedId) => `<option value="__new__" class="new-entry">+ New Vendor…</option>` + vendors
     .map((v) => `<option value="${v.id}" ${v.id === selectedId ? 'selected' : ''}>${escapeHtml(v.name)}</option>`)
@@ -151,7 +162,15 @@ async function renderForm(container, invoiceId) {
   }
 
   container.innerHTML = `
-    <h1>${isEdit ? `Edit Invoice ${escapeHtml(invoice.invoice_number)}` : 'New Incoming Invoice'}</h1>
+    <div class="page-header">
+      <h1>${isEdit ? `Edit Invoice ${escapeHtml(invoice.invoice_number)}` : 'New Incoming Invoice'}</h1>
+      ${isEdit ? `
+        <div class="invoice-nav">
+          <button type="button" class="btn small" id="prev-invoice" ${prevInvoice ? '' : 'disabled'}>◀ Previous</button>
+          <button type="button" class="btn small" id="next-invoice" ${nextInvoice ? '' : 'disabled'}>Next ▶</button>
+        </div>
+      ` : ''}
+    </div>
     <form id="invoice-form" class="card">
       <div class="form-row">
         <label>Vendor
@@ -188,6 +207,12 @@ async function renderForm(container, invoiceId) {
       </div>
 
       <label>Notes<textarea name="notes">${escapeHtml(invoice?.notes || '')}</textarea></label>
+      <div class="notes-preview" id="notes-preview">${window.Helpers.linkify(invoice?.notes || '')}</div>
+
+      <div class="form-field">
+        <span class="field-label">Attachment</span>
+        <div class="attachment-row" id="attachment-row"></div>
+      </div>
 
       <div class="modal-actions">
         <button type="button" class="btn" id="cancel-btn">Cancel</button>
@@ -197,6 +222,78 @@ async function renderForm(container, invoiceId) {
   `;
 
   const tbody = qs('#lines-table tbody', container);
+
+  // Simple touch-based dirty flag: any change after the form's initial render
+  // marks it dirty, and only a successful save clears it. It doesn't try to
+  // detect "changed back to the original value" — good enough for deciding
+  // whether to prompt before navigating away.
+  let dirty = false;
+  function markDirty() { dirty = true; }
+  qs('#invoice-form', container).addEventListener('input', markDirty);
+  qs('#invoice-form', container).addEventListener('change', markDirty);
+
+  let pendingAttachmentPath = null; // absolute path of a newly chosen file, not yet saved
+  let pendingAttachmentName = null;
+  let attachmentRemoved = false;
+
+  function renderAttachmentRow() {
+    const row = qs('#attachment-row', container);
+    if (pendingAttachmentName) {
+      row.innerHTML = `
+        <span class="attachment-name">📎 ${escapeHtml(pendingAttachmentName)} <span class="muted small">(new)</span></span>
+        <button type="button" class="btn small" id="choose-attachment">Replace…</button>
+        <button type="button" class="btn small" id="clear-pending-attachment">Cancel</button>
+      `;
+    } else if (attachmentRemoved) {
+      row.innerHTML = `
+        <span class="muted small">Attachment will be removed on save.</span>
+        <button type="button" class="btn small" id="undo-remove-attachment">Undo</button>
+      `;
+    } else if (invoice?.attachment_name) {
+      row.innerHTML = `
+        <span class="attachment-name">📎 ${escapeHtml(invoice.attachment_name)}</span>
+        <button type="button" class="btn small" id="view-attachment">View</button>
+        <button type="button" class="btn small" id="choose-attachment">Replace…</button>
+        <button type="button" class="btn small danger" id="remove-attachment">Remove</button>
+      `;
+    } else {
+      row.innerHTML = `
+        <span class="muted small">No attachment</span>
+        <button type="button" class="btn small" id="choose-attachment">Choose File…</button>
+      `;
+    }
+
+    const chooseBtn = qs('#choose-attachment', row);
+    if (chooseBtn) chooseBtn.addEventListener('click', async () => {
+      const picked = await window.api.incomingInvoices.chooseAttachment();
+      if (!picked) return;
+      pendingAttachmentPath = picked.filePath;
+      pendingAttachmentName = picked.fileName;
+      attachmentRemoved = false;
+      markDirty();
+      renderAttachmentRow();
+    });
+    const clearPendingBtn = qs('#clear-pending-attachment', row);
+    if (clearPendingBtn) clearPendingBtn.addEventListener('click', () => {
+      pendingAttachmentPath = null;
+      pendingAttachmentName = null;
+      renderAttachmentRow();
+    });
+    const viewBtn = qs('#view-attachment', row);
+    if (viewBtn) viewBtn.addEventListener('click', () => window.api.incomingInvoices.openAttachment(invoiceId));
+    const removeBtn = qs('#remove-attachment', row);
+    if (removeBtn) removeBtn.addEventListener('click', () => {
+      attachmentRemoved = true;
+      markDirty();
+      renderAttachmentRow();
+    });
+    const undoBtn = qs('#undo-remove-attachment', row);
+    if (undoBtn) undoBtn.addEventListener('click', () => {
+      attachmentRemoved = false;
+      renderAttachmentRow();
+    });
+  }
+  renderAttachmentRow();
 
   const vendorSelect = qs('select[name="vendor_id"]', container);
   let lastVendorValue = vendorSelect.value;
@@ -235,6 +332,7 @@ async function renderForm(container, invoiceId) {
       vendors.sort((a, b) => a.name.localeCompare(b.name));
       vendorSelect.innerHTML = `<option value="">Select vendor…</option>${vendorOptions(vendor.id)}`;
       lastVendorValue = vendorSelect.value;
+      markDirty();
       hideModal();
     });
   }
@@ -285,6 +383,7 @@ async function renderForm(container, invoiceId) {
       qs('.line-cost', row).value = item.default_cost;
       recalcRow(row);
       recalcGrandTotal();
+      markDirty();
       hideModal();
     });
   }
@@ -328,6 +427,7 @@ async function renderForm(container, invoiceId) {
       if (qsa('.line-row', tbody).length === 1) return; // keep at least one row
       row.remove();
       recalcGrandTotal();
+      markDirty();
     });
   }
 
@@ -336,13 +436,20 @@ async function renderForm(container, invoiceId) {
   qs('#add-line', container).addEventListener('click', () => {
     tbody.insertAdjacentHTML('beforeend', lineRowHtml(null));
     wireRow(tbody.lastElementChild);
+    markDirty();
   });
 
-  qs('#cancel-btn', container).addEventListener('click', () => window.Helpers.navigate('/incoming-invoices'));
+  const notesField = qs('textarea[name="notes"]', container);
+  const notesPreview = qs('#notes-preview', container);
+  notesField.addEventListener('input', () => {
+    notesPreview.innerHTML = window.Helpers.linkify(notesField.value);
+  });
 
-  qs('#invoice-form', container).addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = new FormData(e.target);
+  async function saveInvoice() {
+    const form = qs('#invoice-form', container);
+    if (!form.reportValidity()) return { ok: false };
+
+    const formData = new FormData(form);
     const lines = qsa('.line-row', tbody).map((row) => ({
       item_id: qs('.line-item', row).value ? Number(qs('.line-item', row).value) : null,
       description: qs('.line-desc', row).value,
@@ -351,18 +458,51 @@ async function renderForm(container, invoiceId) {
     }));
 
     const payload = {
-      vendor_id: Number(form.get('vendor_id')),
-      invoice_number: form.get('invoice_number'),
-      invoice_date: form.get('invoice_date'),
-      notes: form.get('notes'),
-      received: form.get('received') === 'on',
-      paid: form.get('paid') === 'on',
+      vendor_id: Number(formData.get('vendor_id')),
+      invoice_number: formData.get('invoice_number'),
+      invoice_date: formData.get('invoice_date'),
+      notes: formData.get('notes'),
+      received: formData.get('received') === 'on',
+      paid: formData.get('paid') === 'on',
       lines,
     };
+    if (pendingAttachmentPath) payload.attachment_source_path = pendingAttachmentPath;
+    if (attachmentRemoved) payload.remove_attachment = true;
 
-    if (isEdit) await window.api.incomingInvoices.update(invoiceId, payload);
-    else await window.api.incomingInvoices.create(payload);
-    window.Helpers.navigate('/incoming-invoices');
+    const saved = isEdit
+      ? await window.api.incomingInvoices.update(invoiceId, payload)
+      : await window.api.incomingInvoices.create(payload);
+    dirty = false;
+    return { ok: true, invoice: saved };
+  }
+
+  // Registered for the lifetime of this form so navigate() — used by Cancel,
+  // Previous/Next, sidebar links, and anything else that moves screens —
+  // prompts to save first whenever there are unsaved changes.
+  window.Helpers.setNavigationGuard({
+    isDirty: () => dirty,
+    confirmLeave: async () => {
+      if (!dirty) return true;
+      const choice = await window.Helpers.confirmSaveChanges(
+        'This invoice has unsaved changes. Save them before leaving?'
+      );
+      if (choice === 'save') return (await saveInvoice()).ok;
+      return choice === 'discard';
+    },
+  });
+
+  qs('#cancel-btn', container).addEventListener('click', () => window.Helpers.navigate('/incoming-invoices'));
+  if (prevInvoice) {
+    qs('#prev-invoice', container).addEventListener('click', () => window.Helpers.navigate(`/incoming-invoices/${prevInvoice.id}`));
+  }
+  if (nextInvoice) {
+    qs('#next-invoice', container).addEventListener('click', () => window.Helpers.navigate(`/incoming-invoices/${nextInvoice.id}`));
+  }
+
+  qs('#invoice-form', container).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const result = await saveInvoice();
+    if (result.ok) window.Helpers.navigate('/incoming-invoices');
   });
 }
 

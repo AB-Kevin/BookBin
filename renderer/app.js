@@ -23,6 +23,14 @@ function buildNav() {
       <span class="nav-icon">${item.icon}</span><span class="nav-label">${item.label}</span>
     </a>`
   ).join('');
+  // Routed through navigate() (not the native hash link) so a dirty form's
+  // save-prompt guard applies to sidebar clicks too, not just in-screen buttons.
+  nav.querySelectorAll('.nav-link').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.Helpers.navigate(`/${link.dataset.section}`);
+    });
+  });
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -184,6 +192,23 @@ async function initUpdateWidget() {
   renderUpdateWidget();
   checkForUpdates(); // not awaited — a startup check shouldn't block the UI
 }
+
+// Delegated so any screen can drop in a linkify()'d field without wiring its
+// own click handler for each link.
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('[data-ext-link]');
+  if (!link) return;
+  e.preventDefault();
+  window.api.shell.openExternal(link.dataset.extLink);
+});
+
+// Covers closing the window/app with unsaved work — in-app navigation is
+// already guarded via navigate() itself (see helpers.js).
+window.addEventListener('beforeunload', (e) => {
+  if (!window.Helpers.hasUnsavedChanges()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
 
 buildNav();
 initSidebarToggle();

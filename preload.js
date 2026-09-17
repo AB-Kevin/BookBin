@@ -24,10 +24,14 @@ contextBridge.exposeInMainWorld('api', {
   incomingInvoices: {
     ...makeCrud('incomingInvoices'),
     setFlags: (id, flags) => ipcRenderer.invoke('incomingInvoices:setFlags', id, flags),
+    chooseAttachment: () => ipcRenderer.invoke('incomingInvoices:chooseAttachment'),
+    openAttachment: (id) => ipcRenderer.invoke('incomingInvoices:openAttachment', id),
   },
   outgoingInvoices: {
     ...makeCrud('outgoingInvoices'),
     exportPdf: (id) => ipcRenderer.invoke('outgoingInvoices:exportPdf', id),
+    chooseAttachment: () => ipcRenderer.invoke('outgoingInvoices:chooseAttachment'),
+    openAttachment: (id) => ipcRenderer.invoke('outgoingInvoices:openAttachment', id),
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
@@ -41,6 +45,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
+  },
+  shell: {
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   },
   updates: {
     getVersion: () => ipcRenderer.invoke('updates:getVersion'),

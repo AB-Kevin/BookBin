@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS incoming_invoices (
   total REAL NOT NULL DEFAULT 0,
   paid INTEGER NOT NULL DEFAULT 0,
   received INTEGER NOT NULL DEFAULT 0,
+  attachment_path TEXT,
+  attachment_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -79,6 +81,8 @@ CREATE TABLE IF NOT EXISTS outgoing_invoices (
   notes TEXT,
   total REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft',
+  attachment_path TEXT,
+  attachment_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -16,6 +16,10 @@ function ensureColumn(db, table, column, definition) {
 function migrate(db) {
   ensureColumn(db, 'incoming_invoices', 'paid', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'incoming_invoices', 'received', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'incoming_invoices', 'attachment_path', 'TEXT');
+  ensureColumn(db, 'incoming_invoices', 'attachment_name', 'TEXT');
+  ensureColumn(db, 'outgoing_invoices', 'attachment_path', 'TEXT');
+  ensureColumn(db, 'outgoing_invoices', 'attachment_name', 'TEXT');
 }
 
 /**

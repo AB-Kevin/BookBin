@@ -36,9 +36,17 @@ function logoDir(workspaceDir) {
   return path.join(workspaceDir, 'logo');
 }
 
+// kind is 'incoming' or 'outgoing' — kept in separate folders since both
+// invoice tables have their own id sequence and would otherwise collide.
+function attachmentsDir(workspaceDir, kind) {
+  return path.join(workspaceDir, 'attachments', kind);
+}
+
 function ensureWorkspaceDirs(workspaceDir) {
   fs.mkdirSync(workspaceDir, { recursive: true });
   fs.mkdirSync(logoDir(workspaceDir), { recursive: true });
+  fs.mkdirSync(attachmentsDir(workspaceDir, 'incoming'), { recursive: true });
+  fs.mkdirSync(attachmentsDir(workspaceDir, 'outgoing'), { recursive: true });
 }
 
-module.exports = { getWorkspaceDir, setWorkspaceDir, ensureWorkspaceDirs, logoDir };
+module.exports = { getWorkspaceDir, setWorkspaceDir, ensureWorkspaceDirs, logoDir, attachmentsDir };

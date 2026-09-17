@@ -37,10 +37,10 @@ window.Screens.vendors = async function renderVendors(container) {
                       <td>${escapeHtml(v.contact_name || '')}</td>
                       <td>${escapeHtml(v.email || '')}</td>
                       <td>${escapeHtml(v.phone || '')}</td>
-                      <td class="actions">
+                      <td class="actions"><div class="actions-row">
                         <button class="btn small" data-edit="${v.id}">Edit</button>
                         <button class="btn small danger" data-delete="${v.id}">Delete</button>
-                      </td>
+                      </div></td>
                     </tr>
                   `)
                   .join('')}

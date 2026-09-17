@@ -54,12 +54,12 @@ window.Screens.items = async function renderItems(container) {
                       </td>
                       <td class="num">${formatMoney(item.default_cost)}</td>
                       <td class="num">${formatMoney(item.default_price)}</td>
-                      <td class="actions">
+                      <td class="actions"><div class="actions-row">
                         ${item.is_inventory ? `<button class="btn small" data-adjust="${item.id}">Adjust</button>` : ''}
                         ${item.is_inventory ? `<button class="btn small" data-history="${item.id}">History</button>` : ''}
                         <button class="btn small" data-edit="${item.id}">Edit</button>
                         <button class="btn small danger" data-delete="${item.id}">Delete</button>
-                      </td>
+                      </div></td>
                     </tr>
                   `)
                   .join('')}
