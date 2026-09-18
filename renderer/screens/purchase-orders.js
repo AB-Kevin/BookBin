@@ -56,9 +56,9 @@ async function renderOrdersList(container) {
                       <td class="num">${po.total_wanted}</td>
                       <td class="num">${po.total_bought}</td>
                       <td class="actions"><div class="actions-row">
-                        <button class="btn small" data-open="${po.id}">Open</button>
+                        <button class="btn small" data-edit="${po.id}">Edit</button>
                         ${po.status === 'open'
-                          ? `<button class="btn small" data-close="${po.id}">Close</button>`
+                          ? `<button class="btn small" data-complete="${po.id}">Complete</button>`
                           : `<button class="btn small" data-reopen="${po.id}">Reopen</button>`}
                         <button class="btn small danger" data-delete="${po.id}">Delete</button>
                       </div></td>
@@ -71,12 +71,12 @@ async function renderOrdersList(container) {
     `;
 
     qs('#new-order', container).addEventListener('click', openNewOrderModal);
-    qsa('[data-open]', container).forEach((btn) =>
-      btn.addEventListener('click', () => window.Helpers.navigate(`/purchase-orders/${btn.dataset.open}`))
+    qsa('[data-edit]', container).forEach((btn) =>
+      btn.addEventListener('click', () => window.Helpers.navigate(`/purchase-orders/${btn.dataset.edit}`))
     );
-    qsa('[data-close]', container).forEach((btn) =>
+    qsa('[data-complete]', container).forEach((btn) =>
       btn.addEventListener('click', async () => {
-        await window.api.purchaseOrders.close(Number(btn.dataset.close));
+        await window.api.purchaseOrders.close(Number(btn.dataset.complete));
         load();
       })
     );
@@ -182,7 +182,7 @@ async function renderLinesList(container, poId) {
         <div class="header-actions">
           ${isClosed
             ? '<button class="btn" id="reopen-btn">Reopen</button>'
-            : '<button class="btn" id="close-btn">Close</button><button class="btn primary" id="new-line">+ New Line</button>'}
+            : '<button class="btn" id="complete-btn">Complete</button><button class="btn primary" id="new-line">+ New Line</button>'}
         </div>
       </div>
       ${isClosed ? '<p class="muted small">This purchase order is closed — its bought counts are frozen and its lines can\'t be changed until it\'s reopened.</p>' : ''}
@@ -196,7 +196,7 @@ async function renderLinesList(container, poId) {
                   ${sortableHeader('Name', 'name', sortState)}
                   ${sortableHeader('Edition', 'edition', sortState)}
                   ${sortableHeader('ISBN', 'isbn', sortState)}
-                  ${sortableHeader('Max Price', 'max_price', sortState, 'num')}
+                  ${sortableHeader('Max Price (CL)', 'max_price', sortState, 'num')}
                   ${sortableHeader('Bought', 'bought_quantity', sortState, 'num')}
                   <th></th>
                 </tr>
@@ -255,7 +255,7 @@ async function renderLinesList(container, poId) {
 
     if (!isClosed) {
       qs('#new-line', container).addEventListener('click', () => window.Helpers.navigate(`/purchase-orders/${poId}/lines/new`));
-      qs('#close-btn', container).addEventListener('click', async () => {
+      qs('#complete-btn', container).addEventListener('click', async () => {
         await window.api.purchaseOrders.close(poId);
         load();
       });
@@ -339,7 +339,7 @@ async function renderLineForm(container, poId, lineId) {
       </div>
       <div class="form-row">
         <label>Quantity Wanted<input name="quantity_wanted" type="number" step="any" min="0" value="${line?.quantity_wanted ?? 1}" /></label>
-        <label>Max Price<input name="max_price" type="number" step="0.01" min="0" value="${line?.max_price ?? 0}" /></label>
+        <label>Max Price (CL)<input name="max_price" type="number" step="0.01" min="0" value="${line?.max_price ?? 0}" /></label>
       </div>
       <label>Notes<textarea name="notes">${escapeHtml(line?.notes || '')}</textarea></label>
       <div class="modal-actions">
