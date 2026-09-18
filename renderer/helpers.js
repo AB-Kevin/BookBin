@@ -58,9 +58,10 @@ function qsa(sel, root) {
   return Array.from((root || document).querySelectorAll(sel));
 }
 
-function showModal(innerHtml) {
+function showModal(innerHtml, extraClass) {
   const root = document.getElementById('modal-root');
-  root.innerHTML = `<div class="modal-backdrop"><div class="modal">${innerHtml}</div></div>`;
+  const cls = extraClass ? `modal ${extraClass}` : 'modal';
+  root.innerHTML = `<div class="modal-backdrop"><div class="${cls}">${innerHtml}</div></div>`;
   root.querySelector('.modal-backdrop').addEventListener('mousedown', (e) => {
     if (e.target.classList.contains('modal-backdrop')) hideModal();
   });

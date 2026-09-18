@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('api', {
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   },
+  costing: {
+    recalculateItem: (itemId) => ipcRenderer.invoke('costing:recalculateItem', itemId),
+    recalculateAll: () => ipcRenderer.invoke('costing:recalculateAll'),
+    history: (itemId) => ipcRenderer.invoke('costing:history', itemId),
+  },
   updates: {
     getVersion: () => ipcRenderer.invoke('updates:getVersion'),
     check: () => ipcRenderer.invoke('updates:check'),

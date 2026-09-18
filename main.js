@@ -13,6 +13,7 @@ const registerDashboard = require('./ipc/dashboard');
 const registerUpdates = require('./ipc/updates');
 const registerWorkspace = require('./ipc/workspace');
 const registerShell = require('./ipc/shell');
+const registerCosting = require('./ipc/costing');
 
 let mainWindow;
 
@@ -49,6 +50,7 @@ app.whenReady().then(() => {
   registerUpdates(ipcMain, () => mainWindow);
   registerWorkspace(ipcMain, workspaceDir);
   registerShell(ipcMain);
+  registerCosting(ipcMain, db);
 
   createWindow();
 

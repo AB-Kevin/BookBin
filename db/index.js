@@ -20,6 +20,8 @@ function migrate(db) {
   ensureColumn(db, 'incoming_invoices', 'attachment_name', 'TEXT');
   ensureColumn(db, 'outgoing_invoices', 'attachment_path', 'TEXT');
   ensureColumn(db, 'outgoing_invoices', 'attachment_name', 'TEXT');
+  ensureColumn(db, 'incoming_invoices', 'shipping_tax', 'REAL NOT NULL DEFAULT 0');
+  ensureColumn(db, 'settings', 'cost_markup_percent', 'REAL NOT NULL DEFAULT 2');
 }
 
 /**

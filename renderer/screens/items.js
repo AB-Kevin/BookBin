@@ -1,7 +1,7 @@
 window.Screens = window.Screens || {};
 
 window.Screens.items = async function renderItems(container) {
-  const { escapeHtml, formatMoney, showModal, hideModal, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState } = window.Helpers;
+  const { escapeHtml, formatMoney, formatDate, showModal, hideModal, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState } = window.Helpers;
 
   let items = [];
   const sortState = createSortState('name');
@@ -19,7 +19,10 @@ window.Screens.items = async function renderItems(container) {
     container.innerHTML = `
       <div class="page-header">
         <h1>Items</h1>
-        <button class="btn primary" id="new-item">+ New Item</button>
+        <div class="header-actions">
+          <button class="btn" id="recalc-all">Recalculate All Costs</button>
+          <button class="btn primary" id="new-item">+ New Item</button>
+        </div>
       </div>
       <section class="card stats-row">
         <div class="stat">
@@ -57,6 +60,7 @@ window.Screens.items = async function renderItems(container) {
                       <td class="actions"><div class="actions-row">
                         ${item.is_inventory ? `<button class="btn small" data-adjust="${item.id}">Adjust</button>` : ''}
                         ${item.is_inventory ? `<button class="btn small" data-history="${item.id}">History</button>` : ''}
+                        <button class="btn small" data-cost="${item.id}">Cost</button>
                         <button class="btn small" data-edit="${item.id}">Edit</button>
                         <button class="btn small danger" data-delete="${item.id}">Delete</button>
                       </div></td>
@@ -81,6 +85,10 @@ window.Screens.items = async function renderItems(container) {
     window.Helpers.qsa('[data-history]', container).forEach((btn) =>
       btn.addEventListener('click', () => openHistory(Number(btn.dataset.history)))
     );
+    window.Helpers.qsa('[data-cost]', container).forEach((btn) =>
+      btn.addEventListener('click', () => openCostModal(Number(btn.dataset.cost)))
+    );
+    qs('#recalc-all', container).addEventListener('click', onRecalculateAll);
     wireSortableHeaders(container, sortState, render);
   }
 
@@ -186,6 +194,91 @@ window.Screens.items = async function renderItems(container) {
       </div>
     `);
     qs('#close-btn').addEventListener('click', hideModal);
+  }
+
+  // Renders the full audit trail for one cost snapshot: every incoming-invoice
+  // line that fed into it, its share of that invoice's shipping/tax, and the
+  // resulting per-unit cost, plus the weighted-average math that combined them.
+  function renderBreakdown(breakdown) {
+    const rows = breakdown.contributions
+      .map((c) => `
+        <tr>
+          <td>${escapeHtml(c.invoice_number)}</td>
+          <td>${escapeHtml(c.vendor_name || '—')}</td>
+          <td>${formatDate(c.invoice_date)}</td>
+          <td class="num">${c.quantity}</td>
+          <td class="num">${formatMoney(c.unit_cost)}</td>
+          <td class="num">${formatMoney(c.raw_total)}</td>
+          <td class="num">${formatMoney(c.shipping_tax_share)}</td>
+          <td class="num">${formatMoney(c.unit_cost_effective)}</td>
+        </tr>
+      `)
+      .join('');
+    const avgCost = breakdown.totalQuantity > 0 ? breakdown.totalCostWithShipping / breakdown.totalQuantity : 0;
+    return `
+      <table class="cost-breakdown">
+        <thead>
+          <tr>
+            <th>Invoice</th><th>Vendor</th><th>Date</th><th class="num">Qty</th>
+            <th class="num">Unit Cost</th><th class="num">Raw Total</th>
+            <th class="num">Ship/Tax Share</th><th class="num">Effective Unit Cost</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="muted small">
+        Weighted avg cost = ${formatMoney(breakdown.totalCostWithShipping)} total ÷ ${breakdown.totalQuantity} units = ${formatMoney(avgCost)}
+      </p>
+    `;
+  }
+
+  async function openCostModal(itemId) {
+    const item = items.find((i) => i.id === itemId);
+    const history = await window.api.costing.history(itemId);
+    renderCostModal(item, history);
+  }
+
+  function renderCostModal(item, history) {
+    const modal = showModal(`
+      <h2>Cost &amp; Pricing — ${escapeHtml(item.name)}</h2>
+      <p>Current cost: <strong>${formatMoney(item.default_cost)}</strong> &nbsp; Current price: <strong>${formatMoney(item.default_price)}</strong></p>
+      <div class="modal-actions" style="justify-content: flex-start;">
+        <button type="button" class="btn primary" id="recalc-btn">Recalculate Now</button>
+      </div>
+      ${history.length === 0
+        ? '<p class="muted">No cost history yet — this item has never been on an incoming invoice, or hasn\'t been recalculated.</p>'
+        : history
+            .map((snap, i) => `
+              <details class="cost-snapshot" ${i === 0 ? 'open' : ''}>
+                <summary>${escapeHtml(snap.created_at)} — Cost ${formatMoney(snap.cost)}, Price ${formatMoney(snap.price)} (markup ${snap.markup_percent}%)</summary>
+                ${renderBreakdown(snap.breakdown)}
+              </details>
+            `)
+            .join('')}
+      <div class="modal-actions">
+        <button type="button" class="btn" id="close-btn">Close</button>
+      </div>
+    `, 'wide');
+    qs('#close-btn', modal).addEventListener('click', hideModal);
+    qs('#recalc-btn', modal).addEventListener('click', async () => {
+      const result = await window.api.costing.recalculateItem(item.id);
+      if (!result.ok) {
+        window.alert("This item has no incoming-invoice purchase history to calculate a cost from.");
+        return;
+      }
+      const idx = items.findIndex((i) => i.id === item.id);
+      if (idx !== -1) items[idx] = result.item;
+      const newHistory = await window.api.costing.history(item.id);
+      renderCostModal(result.item, newHistory);
+      render(); // refresh the underlying list's Cost/Price columns too
+    });
+  }
+
+  async function onRecalculateAll() {
+    const results = await window.api.costing.recalculateAll();
+    const recalculated = results.filter((r) => r.ok).length;
+    window.alert(`Recalculated cost/price for ${recalculated} of ${results.length} item(s) with purchase history.`);
+    load();
   }
 
   async function onDelete(id) {

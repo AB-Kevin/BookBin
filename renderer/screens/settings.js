@@ -57,6 +57,9 @@ window.Screens.settings = async function renderSettings(container) {
 
         <h2>Inventory</h2>
         <label>Low stock warning threshold<input name="low_stock_threshold" type="number" step="any" value="${settings.low_stock_threshold}" /></label>
+        <label>Cost markup % <span class="muted small">(applied when recalculating an item's selling price from its purchase cost)</span>
+          <input name="cost_markup_percent" type="number" step="any" value="${settings.cost_markup_percent}" />
+        </label>
 
         <div class="modal-actions">
           <button type="submit" class="btn primary">Save Settings</button>
@@ -76,6 +79,7 @@ window.Screens.settings = async function renderSettings(container) {
         outgoing_prefix: form.get('outgoing_prefix'),
         outgoing_next_number: Number(form.get('outgoing_next_number')),
         low_stock_threshold: Number(form.get('low_stock_threshold')),
+        cost_markup_percent: Number(form.get('cost_markup_percent')),
       };
       settings = await window.api.settings.update(payload);
       const confirmation = qs('#save-confirmation', container);

@@ -14,7 +14,8 @@ module.exports = function registerSettings(ipcMain, db, workspaceDir) {
       incoming_next_number = @incoming_next_number,
       outgoing_prefix = @outgoing_prefix,
       outgoing_next_number = @outgoing_next_number,
-      low_stock_threshold = @low_stock_threshold
+      low_stock_threshold = @low_stock_threshold,
+      cost_markup_percent = @cost_markup_percent
     WHERE id = 1
   `);
 

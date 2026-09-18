@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS settings (
   incoming_next_number INTEGER NOT NULL DEFAULT 1,
   outgoing_prefix TEXT NOT NULL DEFAULT 'INV-',
   outgoing_next_number INTEGER NOT NULL DEFAULT 1,
-  low_stock_threshold REAL NOT NULL DEFAULT 5
+  low_stock_threshold REAL NOT NULL DEFAULT 5,
+  cost_markup_percent REAL NOT NULL DEFAULT 2
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS incoming_invoices (
   invoice_date TEXT NOT NULL,
   notes TEXT,
   total REAL NOT NULL DEFAULT 0,
+  shipping_tax REAL NOT NULL DEFAULT 0,
   paid INTEGER NOT NULL DEFAULT 0,
   received INTEGER NOT NULL DEFAULT 0,
   attachment_path TEXT,
@@ -108,7 +110,22 @@ CREATE TABLE IF NOT EXISTS inventory_adjustments (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One row per cost/price recalculation for an item, so a later question about
+-- "why is this priced the way it is" can be answered even if the incoming
+-- invoices that fed into it are later edited or deleted. `breakdown` is a
+-- JSON blob of every contributing invoice line and its computed shares.
+CREATE TABLE IF NOT EXISTS item_cost_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  cost REAL NOT NULL,
+  price REAL NOT NULL,
+  markup_percent REAL NOT NULL,
+  breakdown TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_incoming_lines_invoice ON incoming_invoice_lines(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_outgoing_lines_invoice ON outgoing_invoice_lines(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_adjustments_item ON inventory_adjustments(item_id);
 CREATE INDEX IF NOT EXISTS idx_adjustments_source ON inventory_adjustments(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_cost_snapshots_item ON item_cost_snapshots(item_id);

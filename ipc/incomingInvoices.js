@@ -58,13 +58,13 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
     ORDER BY l.id
   `);
   const insertInvoiceStmt = db.prepare(`
-    INSERT INTO incoming_invoices (vendor_id, invoice_number, invoice_date, notes, total, paid, received, attachment_path, attachment_name)
-    VALUES (@vendor_id, @invoice_number, @invoice_date, @notes, @total, @paid, @received, @attachment_path, @attachment_name)
+    INSERT INTO incoming_invoices (vendor_id, invoice_number, invoice_date, notes, total, shipping_tax, paid, received, attachment_path, attachment_name)
+    VALUES (@vendor_id, @invoice_number, @invoice_date, @notes, @total, @shipping_tax, @paid, @received, @attachment_path, @attachment_name)
   `);
   const updateInvoiceStmt = db.prepare(`
     UPDATE incoming_invoices SET
       vendor_id = @vendor_id, invoice_number = @invoice_number,
-      invoice_date = @invoice_date, notes = @notes, total = @total,
+      invoice_date = @invoice_date, notes = @notes, total = @total, shipping_tax = @shipping_tax,
       paid = @paid, received = @received,
       attachment_path = @attachment_path, attachment_name = @attachment_name
     WHERE id = @id
@@ -102,14 +102,18 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
       invoice_number: data.invoice_number && data.invoice_number.trim() ? data.invoice_number.trim() : null,
       invoice_date: data.invoice_date,
       notes: data.notes || null,
+      shipping_tax: Number(data.shipping_tax || 0),
       paid: data.paid ? 1 : 0,
       received: data.received ? 1 : 0,
       ...resolveAttachment(current, data),
     };
   }
 
-  function computeTotal(lines) {
-    return lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_cost), 0);
+  // The invoice's total reflects what was actually paid the vendor, so it
+  // includes shipping/tax rather than just the sum of line items.
+  function computeTotal(lines, shippingTax) {
+    const linesTotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_cost), 0);
+    return linesTotal + Number(shippingTax || 0);
   }
 
   // Reverses any inventory effect a previous save of this invoice caused,
@@ -165,7 +169,7 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
     const header = withInvoiceDefaults(data, null);
     if (!header.invoice_number) header.invoice_number = nextInvoiceNumber();
     const lines = data.lines || [];
-    header.total = computeTotal(lines);
+    header.total = computeTotal(lines, header.shipping_tax);
 
     const info = insertInvoiceStmt.run(header);
     const invoiceId = info.lastInsertRowid;
@@ -193,7 +197,7 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
     const header = withInvoiceDefaults(data, current);
     if (!header.invoice_number) header.invoice_number = nextInvoiceNumber();
     const lines = data.lines || [];
-    header.total = computeTotal(lines);
+    header.total = computeTotal(lines, header.shipping_tax);
     header.id = id;
     updateInvoiceStmt.run(header);
 

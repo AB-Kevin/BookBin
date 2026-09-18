@@ -202,6 +202,10 @@ async function renderForm(container, invoiceId) {
       </table>
       <button type="button" class="btn" id="add-line">+ Add Line</button>
 
+      <div class="form-row">
+        <label>Shipping/Tax<input name="shipping_tax" type="number" step="0.01" min="0" value="${invoice?.shipping_tax ?? 0}" /></label>
+      </div>
+
       <div class="totals">
         <strong>Total: <span id="grand-total">${formatMoney(invoice?.total || 0)}</span></strong>
       </div>
@@ -395,12 +399,13 @@ async function renderForm(container, invoiceId) {
   }
 
   function recalcGrandTotal() {
-    const total = qsa('.line-row', tbody).reduce((sum, row) => {
+    const linesTotal = qsa('.line-row', tbody).reduce((sum, row) => {
       const qty = Number(qs('.line-qty', row).value || 0);
       const cost = Number(qs('.line-cost', row).value || 0);
       return sum + qty * cost;
     }, 0);
-    qs('#grand-total', container).textContent = formatMoney(total);
+    const shippingTax = Number(qs('input[name="shipping_tax"]', container).value || 0);
+    qs('#grand-total', container).textContent = formatMoney(linesTotal + shippingTax);
   }
 
   function wireRow(row) {
@@ -439,6 +444,8 @@ async function renderForm(container, invoiceId) {
     markDirty();
   });
 
+  qs('input[name="shipping_tax"]', container).addEventListener('input', recalcGrandTotal);
+
   const notesField = qs('textarea[name="notes"]', container);
   const notesPreview = qs('#notes-preview', container);
   notesField.addEventListener('input', () => {
@@ -462,6 +469,7 @@ async function renderForm(container, invoiceId) {
       invoice_number: formData.get('invoice_number'),
       invoice_date: formData.get('invoice_date'),
       notes: formData.get('notes'),
+      shipping_tax: Number(formData.get('shipping_tax') || 0),
       received: formData.get('received') === 'on',
       paid: formData.get('paid') === 'on',
       lines,
