@@ -1,6 +1,6 @@
 {
   "name": "bookbin",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Inventory tracker and invoice generator",
   "main": "main.js",
   "private": true,
