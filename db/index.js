@@ -22,6 +22,23 @@ function migrate(db) {
   ensureColumn(db, 'outgoing_invoices', 'attachment_name', 'TEXT');
   ensureColumn(db, 'incoming_invoices', 'shipping_tax', 'REAL NOT NULL DEFAULT 0');
   ensureColumn(db, 'settings', 'cost_markup_percent', 'REAL NOT NULL DEFAULT 2');
+  ensureColumn(db, 'purchase_order_items', 'purchase_order_id', 'INTEGER REFERENCES purchase_orders(id) ON DELETE CASCADE');
+  ensureColumn(db, 'purchase_order_items', 'frozen_bought_quantity', 'REAL');
+  // Must run after the ensureColumn call above, not in schema.sql: on a
+  // pre-existing database, purchase_order_id doesn't exist yet when
+  // schema.sql's CREATE statements run, so an index on it there would fail.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id)');
+
+  // purchase_order_items originally had no parent document at all — fold any
+  // pre-existing lines from that version into one, so they aren't silently
+  // orphaned by the new purchase_order_id column.
+  const orphanCount = db.prepare(
+    'SELECT COUNT(*) AS c FROM purchase_order_items WHERE purchase_order_id IS NULL'
+  ).get().c;
+  if (orphanCount > 0) {
+    const info = db.prepare("INSERT INTO purchase_orders (name, status) VALUES ('Purchase Order', 'open')").run();
+    db.prepare('UPDATE purchase_order_items SET purchase_order_id = ? WHERE purchase_order_id IS NULL').run(info.lastInsertRowid);
+  }
 }
 
 /**

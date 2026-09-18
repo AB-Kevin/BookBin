@@ -54,6 +54,19 @@ contextBridge.exposeInMainWorld('api', {
     recalculateAll: () => ipcRenderer.invoke('costing:recalculateAll'),
     history: (itemId) => ipcRenderer.invoke('costing:history', itemId),
   },
+  purchaseOrders: {
+    ...makeCrud('purchaseOrders'),
+    close: (id) => ipcRenderer.invoke('purchaseOrders:close', id),
+    reopen: (id) => ipcRenderer.invoke('purchaseOrders:reopen', id),
+  },
+  purchaseOrderItems: {
+    list: (purchaseOrderId) => ipcRenderer.invoke('purchaseOrderItems:list', purchaseOrderId),
+    get: (id) => ipcRenderer.invoke('purchaseOrderItems:get', id),
+    create: (data) => ipcRenderer.invoke('purchaseOrderItems:create', data),
+    update: (id, data) => ipcRenderer.invoke('purchaseOrderItems:update', id, data),
+    delete: (id) => ipcRenderer.invoke('purchaseOrderItems:delete', id),
+    invoices: (id) => ipcRenderer.invoke('purchaseOrderItems:invoices', id),
+  },
   lock: {
     getStatus: () => ipcRenderer.invoke('lock:getStatus'),
     requestAccess: () => ipcRenderer.invoke('lock:requestAccess'),

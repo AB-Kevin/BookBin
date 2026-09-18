@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { path: 'customers', label: 'Customers', icon: '👥' },
   { path: 'incoming-invoices', label: 'Incoming Invoices', icon: '📥' },
   { path: 'outgoing-invoices', label: 'Outgoing Invoices', icon: '📤' },
+  { path: 'purchase-orders', label: 'Purchase Orders', icon: '📝' },
   { path: 'settings', label: 'Settings', icon: '⚙️' },
 ];
 
@@ -62,8 +63,13 @@ function initSidebarToggle() {
 
 function parseHash() {
   const raw = window.location.hash.replace(/^#\/?/, '');
-  const [section, param] = raw.split('/');
-  return { section: section || 'dashboard', param: param || null };
+  const parts = raw.split('/').filter(Boolean);
+  const section = parts[0] || 'dashboard';
+  const rest = parts.slice(1);
+  // `param` (rest[0]) is kept for every existing screen's #/section/param
+  // shape; `rest` is the full remaining path for screens nested deeper than
+  // that, like purchase-orders/:id/lines/:lineId.
+  return { section, param: rest[0] || null, rest };
 }
 
 function screenFor(section) {
@@ -74,13 +80,14 @@ function screenFor(section) {
     customers: window.Screens.customers,
     'incoming-invoices': window.Screens.incomingInvoices,
     'outgoing-invoices': window.Screens.outgoingInvoices,
+    'purchase-orders': window.Screens.purchaseOrders,
     settings: window.Screens.settings,
   };
   return map[section] || window.Screens.dashboard;
 }
 
 async function render() {
-  const { section, param } = parseHash();
+  const { section, param, rest } = parseHash();
   window.Helpers.qsa('.nav-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.section === section);
   });
@@ -88,7 +95,7 @@ async function render() {
   const container = document.getElementById('content');
   container.innerHTML = '<p class="loading">Loading…</p>';
   try {
-    await screenFor(section)(container, param);
+    await screenFor(section)(container, param, rest);
   } catch (err) {
     console.error(err);
     container.innerHTML = `<p class="error">Something went wrong: ${window.Helpers.escapeHtml(err.message)}</p>`;

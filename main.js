@@ -14,6 +14,8 @@ const registerUpdates = require('./ipc/updates');
 const registerWorkspace = require('./ipc/workspace');
 const registerShell = require('./ipc/shell');
 const registerCosting = require('./ipc/costing');
+const registerPurchaseOrders = require('./ipc/purchaseOrders');
+const registerPurchaseOrderItems = require('./ipc/purchaseOrderItems');
 const registerLock = require('./ipc/lock');
 const registerActivityMonitor = require('./ipc/activity');
 
@@ -34,6 +36,7 @@ const READONLY_EXEMPT_CHANNELS = new Set([
   'shell:openExternal',
   'updates:check', 'updates:download', 'updates:quitAndInstall', 'updates:openReleasesPage', 'updates:getVersion',
   'lock:getStatus', 'lock:requestAccess', 'lock:respondToRequest',
+  'purchaseOrderItems:invoices',
 ]);
 
 function installReadOnlyGuard() {
@@ -88,6 +91,8 @@ app.whenReady().then(() => {
   registerWorkspace(ipcMain, workspaceDir);
   registerShell(ipcMain);
   registerCosting(ipcMain, db);
+  registerPurchaseOrders(ipcMain, db);
+  registerPurchaseOrderItems(ipcMain, db);
 
   lockController = registerLock(ipcMain, workspaceDir, () => mainWindow);
   registerActivityMonitor(ipcMain, () => mainWindow, () => app.quit());

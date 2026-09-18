@@ -27,6 +27,7 @@
       "main.js",
       "preload.js",
       "workspace.js",
+      "lock.js",
       "db/**/*",
       "ipc/**/*",
       "renderer/**/*",

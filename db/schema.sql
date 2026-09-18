@@ -124,8 +124,45 @@ CREATE TABLE IF NOT EXISTS item_cost_snapshots (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One purchase-order document per buying season/year (your brother's "please
+-- buy me these" list). Closing one freezes its lines' bought counts (see
+-- purchase_order_items.frozen_bought_quantity) and blocks further edits;
+-- reopening clears the freeze so it goes back to live-computed.
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  closed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Each line is linked to an items catalog entry (item_id) so "how many have
+-- I bought" and "which invoices have this" can be computed straight from
+-- real incoming-invoice history, the same way item costing already is,
+-- instead of matching on free text. Purchases aren't scoped by date to a
+-- particular purchase order — stock fully sells through between yearly
+-- batches, so an item's all-time purchased total is exactly what a currently
+-- open order's line wants to show.
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_order_id INTEGER REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  edition TEXT,
+  isbn TEXT,
+  quantity_wanted REAL NOT NULL DEFAULT 1,
+  max_price REAL NOT NULL DEFAULT 0,
+  notes TEXT,
+  frozen_bought_quantity REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_incoming_lines_invoice ON incoming_invoice_lines(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_outgoing_lines_invoice ON outgoing_invoice_lines(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_adjustments_item ON inventory_adjustments(item_id);
 CREATE INDEX IF NOT EXISTS idx_adjustments_source ON inventory_adjustments(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_cost_snapshots_item ON item_cost_snapshots(item_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_order_items_item ON purchase_order_items(item_id);
+-- idx_purchase_order_items_po is created in db/index.js's migrate(), not here:
+-- purchase_order_id is a column added via migration for pre-existing
+-- databases, and this file's CREATE statements all run before migrate() does.

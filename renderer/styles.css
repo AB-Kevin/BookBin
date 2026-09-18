@@ -321,6 +321,52 @@ td.actions { text-align: right; }
 .badge.status-paid { background: #dcfce7; color: #15803d; }
 .badge.status-sent { background: #dbeafe; color: #1d4ed8; }
 .badge.status-draft { background: #f3f4f6; color: #6b7280; }
+.badge.status-open { background: #dbeafe; color: #1d4ed8; }
+.badge.status-closed { background: #f3f4f6; color: #6b7280; }
+
+.back-link {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  margin-bottom: 6px;
+}
+.back-link:hover { color: var(--text); text-decoration: underline; }
+
+.progress-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #eef0f3;
+  color: var(--text);
+}
+.progress-badge.progress-done { background: #dcfce7; color: #15803d; }
+
+/* Purchase Orders: row tinted by how much of the wanted quantity has been
+   bought — red (none), yellow (some), green (all). The notes sub-row under
+   a line shares its tint so the pair reads as one unit. */
+.po-table td { vertical-align: top; border-bottom: none; }
+.po-table tr.po-group-end td { border-bottom: 1px solid var(--border); }
+tr.po-row-none, tr.po-notes-row.po-row-none { background: #fef2f2; }
+tr.po-row-partial, tr.po-notes-row.po-row-partial { background: #fffbeb; }
+tr.po-row-full, tr.po-notes-row.po-row-full { background: #f0fdf4; }
+.po-expand-cell { width: 1%; white-space: nowrap; }
+.expand-toggle {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 4px;
+  line-height: 1;
+}
+.expand-toggle:hover { color: var(--text); }
+.po-notes-row td { padding-top: 0; font-size: 13px; color: var(--muted); font-style: italic; }
+.po-invoices-row td { padding: 10px 10px 14px; background: #fafafa; }
+.nested-table { width: 100%; font-size: 13px; }
+.nested-table th, .nested-table td { padding: 4px 8px; }
 
 form label {
   display: block;
