@@ -21,11 +21,17 @@ body {
   font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
   background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
+
+#banner-root:empty { display: none; }
 
 #shell {
   display: flex;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
 }
 
 #sidebar {
@@ -365,6 +371,38 @@ option.new-entry { color: var(--primary); font-style: italic; }
   word-break: break-word;
 }
 .notes-preview:empty { display: none; }
+
+.banner {
+  padding: 10px 20px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.banner-readonly { background: #fef3c7; color: #92400e; }
+.banner-autoclose { background: #fee2e2; color: #991b1b; }
+.banner-request { background: #dbeafe; color: #1e40af; }
+.banner-granted { background: #dcfce7; color: #15803d; }
+.banner .btn { flex-shrink: 0; }
+
+/* Read-only mode: everything inside the main content area and any open
+   modal becomes inert. th.sortable and the sidebar/banner (which live
+   outside #content and .modal) are deliberately untouched, so browsing,
+   sorting, and navigating still work — only actions that would write to the
+   shared database are blocked. */
+body.read-only-mode #content button,
+body.read-only-mode #content input,
+body.read-only-mode #content select,
+body.read-only-mode #content textarea,
+body.read-only-mode .modal button,
+body.read-only-mode .modal input,
+body.read-only-mode .modal select,
+body.read-only-mode .modal textarea {
+  pointer-events: none;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .ext-link { color: var(--primary); text-decoration: underline; cursor: pointer; }
 
 .cost-snapshot { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }

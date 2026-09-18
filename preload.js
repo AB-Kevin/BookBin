@@ -54,6 +54,34 @@ contextBridge.exposeInMainWorld('api', {
     recalculateAll: () => ipcRenderer.invoke('costing:recalculateAll'),
     history: (itemId) => ipcRenderer.invoke('costing:history', itemId),
   },
+  lock: {
+    getStatus: () => ipcRenderer.invoke('lock:getStatus'),
+    requestAccess: () => ipcRenderer.invoke('lock:requestAccess'),
+    respondToRequest: (action) => ipcRenderer.invoke('lock:respondToRequest', action),
+    onStatus: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('lock:status', listener);
+      return () => ipcRenderer.removeListener('lock:status', listener);
+    },
+    onIncomingRequest: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('lock:incomingRequest', listener);
+      return () => ipcRenderer.removeListener('lock:incomingRequest', listener);
+    },
+    onRequestResult: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('lock:requestResult', listener);
+      return () => ipcRenderer.removeListener('lock:requestResult', listener);
+    },
+  },
+  activity: {
+    notify: () => ipcRenderer.send('activity:ping'),
+    onCountdown: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('activity:countdown', listener);
+      return () => ipcRenderer.removeListener('activity:countdown', listener);
+    },
+  },
   updates: {
     getVersion: () => ipcRenderer.invoke('updates:getVersion'),
     check: () => ipcRenderer.invoke('updates:check'),
