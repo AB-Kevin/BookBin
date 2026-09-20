@@ -39,7 +39,11 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
   }
 
   const listStmt = db.prepare(`
-    SELECT ii.*, v.name AS vendor_name
+    SELECT ii.*, v.name AS vendor_name,
+      (SELECT GROUP_CONCAT(COALESCE(i.name, l.description), '||')
+       FROM incoming_invoice_lines l
+       LEFT JOIN items i ON i.id = l.item_id
+       WHERE l.invoice_id = ii.id) AS line_items
     FROM incoming_invoices ii
     LEFT JOIN vendors v ON v.id = ii.vendor_id
     ORDER BY ii.invoice_date DESC, ii.id DESC

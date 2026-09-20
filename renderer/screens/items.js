@@ -4,6 +4,7 @@ window.Screens.items = async function renderItems(container) {
   const { escapeHtml, formatMoney, formatDate, showModal, hideModal, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState } = window.Helpers;
 
   let items = [];
+  let searchTerm = '';
   const sortState = createSortState('name');
 
   async function load() {
@@ -12,7 +13,15 @@ window.Screens.items = async function renderItems(container) {
   }
 
   function render() {
-    const rows = sortedRows(items, sortState);
+    const term = searchTerm.trim().toLowerCase();
+    const filteredItems = term
+      ? items.filter((item) =>
+          [item.name, item.sku, item.description].some((field) =>
+            String(field || '').toLowerCase().includes(term)
+          )
+        )
+      : items;
+    const rows = sortedRows(filteredItems, sortState);
     const totalOnHand = items
       .filter((item) => item.is_inventory)
       .reduce((sum, item) => sum + Number(item.quantity_on_hand || 0), 0);
@@ -20,6 +29,7 @@ window.Screens.items = async function renderItems(container) {
       <div class="page-header">
         <h1>Items</h1>
         <div class="header-actions">
+          <input type="search" id="item-search" class="search-input" placeholder="Search items…" value="${escapeHtml(searchTerm)}" />
           <button class="btn" id="recalc-all">Recalculate All Costs</button>
           <button class="btn primary" id="new-item">+ New Item</button>
         </div>
@@ -33,6 +43,8 @@ window.Screens.items = async function renderItems(container) {
       <section class="card">
         ${items.length === 0
           ? '<p class="muted">No items yet.</p>'
+          : rows.length === 0
+          ? '<p class="muted">No items match your search.</p>'
           : `<table>
               <thead>
                 <tr>
@@ -71,6 +83,16 @@ window.Screens.items = async function renderItems(container) {
             </table>`}
       </section>
     `;
+
+    const searchInput = qs('#item-search', container);
+    searchInput.addEventListener('input', (e) => {
+      searchTerm = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      render();
+      const newSearchInput = qs('#item-search', container);
+      newSearchInput.focus();
+      newSearchInput.setSelectionRange(cursorPos, cursorPos);
+    });
 
     qs('#new-item', container).addEventListener('click', () => openForm(null));
     window.Helpers.qsa('[data-edit]', container).forEach((btn) =>

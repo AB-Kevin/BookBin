@@ -12,6 +12,8 @@ async function renderList(container) {
   const { escapeHtml, formatMoney, formatDate, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState } = window.Helpers;
 
   let invoices = [];
+  let searchTerm = '';
+  let vendorFilter = '';
   const sortState = createSortState('invoice_date', 'desc');
 
   async function load() {
@@ -19,8 +21,30 @@ async function renderList(container) {
     render();
   }
 
+  function vendorFilterOptions() {
+    const vendorsById = new Map();
+    invoices.forEach((inv) => {
+      if (inv.vendor_id != null) vendorsById.set(inv.vendor_id, inv.vendor_name || '—');
+    });
+    return [...vendorsById.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => `<option value="${id}" ${String(id) === vendorFilter ? 'selected' : ''}>${escapeHtml(name)}</option>`)
+      .join('');
+  }
+
   function render() {
-    const rows = sortedRows(invoices, sortState);
+    const term = searchTerm.trim().toLowerCase();
+    let filteredInvoices = invoices;
+    if (vendorFilter) {
+      filteredInvoices = filteredInvoices.filter((inv) => String(inv.vendor_id) === vendorFilter);
+    }
+    if (term) {
+      filteredInvoices = filteredInvoices.filter((inv) =>
+        String(inv.invoice_number || '').toLowerCase().includes(term) ||
+        String(inv.line_items || '').toLowerCase().includes(term)
+      );
+    }
+    const rows = sortedRows(filteredInvoices, sortState);
 
     const now = new Date();
     const oneMonthAgo = new Date(now);
@@ -38,7 +62,14 @@ async function renderList(container) {
     container.innerHTML = `
       <div class="page-header">
         <h1>Incoming Invoices</h1>
-        <button class="btn primary" id="new-invoice">+ New Invoice</button>
+        <div class="header-actions">
+          <input type="search" id="invoice-search" class="search-input" placeholder="Search invoice # or item…" value="${escapeHtml(searchTerm)}" />
+          <select id="vendor-filter" class="search-input">
+            <option value="">All Vendors</option>
+            ${vendorFilterOptions()}
+          </select>
+          <button class="btn primary" id="new-invoice">+ New Invoice</button>
+        </div>
       </div>
       <section class="card stats-row">
         <div class="stat">
@@ -53,6 +84,8 @@ async function renderList(container) {
       <section class="card">
         ${invoices.length === 0
           ? '<p class="muted">No incoming invoices yet.</p>'
+          : rows.length === 0
+          ? '<p class="muted">No invoices match your search/filter.</p>'
           : `<table>
               <thead><tr>
                 ${sortableHeader('#', 'invoice_number', sortState)}
@@ -85,6 +118,20 @@ async function renderList(container) {
             </table>`}
       </section>
     `;
+
+    const searchInput = qs('#invoice-search', container);
+    searchInput.addEventListener('input', (e) => {
+      searchTerm = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      render();
+      const newSearchInput = qs('#invoice-search', container);
+      newSearchInput.focus();
+      newSearchInput.setSelectionRange(cursorPos, cursorPos);
+    });
+    qs('#vendor-filter', container).addEventListener('change', (e) => {
+      vendorFilter = e.target.value;
+      render();
+    });
 
     qs('#new-invoice', container).addEventListener('click', () => window.Helpers.navigate('/incoming-invoices/new'));
     qsa('[data-edit]', container).forEach((btn) =>
