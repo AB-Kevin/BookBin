@@ -21,8 +21,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.bookbin.app",
-    "productName": "BookBin",
+    "appId": "com.bookbin.app.dev",
+    "productName": "BookBin Dev",
     "files": [
       "main.js",
       "preload.js",
