@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const { initDatabase } = require('./db');
+const { initDatabase, backupDatabase, closeDatabase } = require('./db');
 const { getWorkspaceDir, ensureWorkspaceDirs } = require('./workspace');
 
 const registerItems = require('./ipc/items');
@@ -20,6 +20,7 @@ const registerLock = require('./ipc/lock');
 const registerActivityMonitor = require('./ipc/activity');
 
 let mainWindow;
+let db = null;
 let lockController = null;
 
 // Channels that never touch the shared database (or are pure reads of it)
@@ -76,7 +77,7 @@ function createWindow() {
 app.whenReady().then(() => {
   const workspaceDir = getWorkspaceDir();
   ensureWorkspaceDirs(workspaceDir);
-  const db = initDatabase(workspaceDir);
+  db = initDatabase(workspaceDir);
 
   installReadOnlyGuard();
 
@@ -88,7 +89,7 @@ app.whenReady().then(() => {
   registerSettings(ipcMain, db, workspaceDir);
   registerDashboard(ipcMain, db);
   registerUpdates(ipcMain, () => mainWindow);
-  registerWorkspace(ipcMain, workspaceDir);
+  registerWorkspace(ipcMain, db, workspaceDir);
   registerShell(ipcMain);
   registerCosting(ipcMain, db);
   registerPurchaseOrders(ipcMain, db);
@@ -97,6 +98,10 @@ app.whenReady().then(() => {
   lockController = registerLock(ipcMain, workspaceDir, () => mainWindow);
   registerActivityMonitor(ipcMain, () => mainWindow, () => app.quit());
 
+  // Only the write-lock holder snapshots; see backupDatabase. registerLock
+  // resolves the lock synchronously, so this reflects the real state.
+  if (!lockController.isReadOnly()) backupDatabase(db, workspaceDir);
+
   createWindow();
 
   app.on('activate', () => {
@@ -104,8 +109,12 @@ app.whenReady().then(() => {
   });
 });
 
+// Release the lock first, then checkpoint and close — a device waiting on the
+// lock should see it freed without waiting on the checkpoint, and the
+// checkpoint doesn't need the lock since we're the only writer either way.
 app.on('before-quit', () => {
   if (lockController) lockController.releaseIfHeld();
+  closeDatabase(db);
 });
 
 app.on('window-all-closed', () => {

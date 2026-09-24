@@ -8,7 +8,14 @@
 const fs = require('fs');
 const path = require('path');
 
-const STALE_MS = 5 * 60 * 1000;
+// Deliberately generous. A lock only looks stale because its holder stopped
+// refreshing it, but on a cloud-synced workspace it can also look stale
+// because the holder's heartbeat simply hasn't synced over yet — the provider
+// is paused, catching up on a large upload, or the machine slept. Claiming a
+// lock that is actually still held means two devices writing the same
+// database, so the window is sized for sync lag rather than for fast
+// recovery; a genuinely crashed holder just takes longer to time out.
+const STALE_MS = 15 * 60 * 1000;
 
 function lockFilePath(workspaceDir) {
   return path.join(workspaceDir, 'bookbin.lock');
