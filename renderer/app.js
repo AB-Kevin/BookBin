@@ -224,7 +224,7 @@ window.addEventListener('beforeunload', (e) => {
 // Tells ipc/activity.js's auto-close timer someone is actually using BookBin.
 // Deliberately scoped to input inside this window rather than Electron's
 // system-wide idle time, so leaving the app open in the background while
-// working in something else doesn't keep the shared write lock held.
+// working in something else still counts as idle.
 // Throttled to once/second — plenty of resolution for a 2-hour timer, and
 // far cheaper than pinging on every mousemove.
 let lastActivityPing = 0;
@@ -238,109 +238,34 @@ function notifyActivity() {
   window.addEventListener(type, notifyActivity, { passive: true });
 });
 
-// --- Shared-database lock + inactivity auto-close banners -------------------
-// ipc/lock.js owns whether another device currently holds the write lock
-// (plus the request-access handshake); ipc/activity.js owns the 2-hour-idle
-// auto-close countdown. All of them just push status here — the CSS in
-// styles.css (body.read-only-mode) is what actually disables editing
-// controls app-wide once the class is applied below.
-let lockStatus = { readOnly: false, lockedByHost: null, lockedAt: null };
-let myRequestState = null; // 'waiting' | 'granted' | 'declined' | 'timed-out' | null
-let incomingRequest = null; // { requestId, requestedByHost, remainingSeconds } | null (holder side)
+// --- Inactivity auto-close banner -------------------------------------------
+// ipc/activity.js owns the 2-hour-idle countdown and pushes it here. This used
+// to also carry the shared-database lock banners -- whose computer held the
+// write lock, and the request-access handshake between them -- none of which
+// exist any more: Postgres lets everyone write at once, so there is nothing to
+// queue for and nothing to ask permission from.
 let autoCloseRemaining = null;
-let requestResultClearTimer = null;
-
-function formatLockTimestamp(iso) {
-  if (!iso) return '';
-  try {
-    return new Date(iso).toLocaleString();
-  } catch (err) {
-    return iso;
-  }
-}
 
 function renderBanners() {
   const root = document.getElementById('banner-root');
-  const { escapeHtml } = window.Helpers;
-  const parts = [];
+  if (!root) return;
 
-  if (lockStatus.readOnly) {
-    if (myRequestState === 'waiting') {
-      parts.push(`
-        <div class="banner banner-readonly">
-          ⏳ Waiting for <strong>${escapeHtml(lockStatus.lockedByHost || 'the other computer')}</strong>
-          to respond to your access request (up to 5 minutes)…
-        </div>
-      `);
-    } else {
-      const since = lockStatus.lockedAt ? ` since ${escapeHtml(formatLockTimestamp(lockStatus.lockedAt))}` : '';
-      const note = myRequestState === 'declined' ? ' Your last request was declined.'
-        : myRequestState === 'timed-out' ? ' Your last request timed out with no response.'
-        : '';
-      parts.push(`
-        <div class="banner banner-readonly">
-          🔒 Read-only — this database is currently open on
-          <strong>${escapeHtml(lockStatus.lockedByHost || 'another computer')}</strong>${since}.${note}
-          <button type="button" class="btn small" id="request-access-btn">Request Access</button>
-        </div>
-      `);
-    }
-  } else if (myRequestState === 'granted') {
-    parts.push(`<div class="banner banner-granted">✅ Access granted — you can edit again.</div>`);
+  if (autoCloseRemaining == null) {
+    root.innerHTML = '';
+    return;
   }
 
-  if (incomingRequest) {
-    const mins = Math.floor(incomingRequest.remainingSeconds / 60);
-    const secs = String(incomingRequest.remainingSeconds % 60).padStart(2, '0');
-    parts.push(`
-      <div class="banner banner-request">
-        📨 <strong>${escapeHtml(incomingRequest.requestedByHost)}</strong> is requesting access to this database.
-        <button type="button" class="btn small primary" id="retain-access-btn">Retain Access</button>
-        <button type="button" class="btn small" id="release-access-btn">Release Access</button>
-        <span>Auto-releasing in ${mins}:${secs}</span>
-      </div>
-    `);
-  }
+  root.innerHTML = `
+    <div class="banner banner-autoclose">
+      ⏳ BookBin will close in ${autoCloseRemaining}s due to inactivity.
+      <button type="button" class="btn small" id="keep-open-btn">Keep Open</button>
+    </div>
+  `;
 
-  if (autoCloseRemaining != null) {
-    parts.push(`
-      <div class="banner banner-autoclose">
-        ⏳ BookBin will close in ${autoCloseRemaining}s due to inactivity.
-        <button type="button" class="btn small" id="keep-open-btn">Keep Open</button>
-      </div>
-    `);
-  }
-
-  root.innerHTML = parts.join('');
-
-  const requestBtn = document.getElementById('request-access-btn');
-  if (requestBtn) {
-    requestBtn.addEventListener('click', () => {
-      myRequestState = 'waiting';
-      renderBanners();
-      window.api.lock.requestAccess();
-    });
-  }
-  const retainBtn = document.getElementById('retain-access-btn');
-  if (retainBtn) {
-    retainBtn.addEventListener('click', () => {
-      incomingRequest = null;
-      renderBanners();
-      window.api.lock.respondToRequest('retain');
-    });
-  }
-  const releaseBtn = document.getElementById('release-access-btn');
-  if (releaseBtn) {
-    releaseBtn.addEventListener('click', () => {
-      incomingRequest = null;
-      renderBanners();
-      window.api.lock.respondToRequest('release');
-    });
-  }
-  const keepOpenBtn = document.getElementById('keep-open-btn');
   // Clicking this counts as input inside the window, so it resets the same
   // clock ipc/activity.js reads from — this just hides the banner instantly
   // instead of waiting up to a second for that to come back around.
+  const keepOpenBtn = document.getElementById('keep-open-btn');
   if (keepOpenBtn) {
     keepOpenBtn.addEventListener('click', () => {
       autoCloseRemaining = null;
@@ -349,39 +274,7 @@ function renderBanners() {
   }
 }
 
-function applyLockStatus(status) {
-  lockStatus = status;
-  // Cover the case where the lock simply freed up (holder quit, went stale)
-  // rather than our request being explicitly answered — still a "granted"
-  // outcome from the requester's point of view, regardless of event order
-  // against the dedicated lock:requestResult push below.
-  if (!status.readOnly && myRequestState === 'waiting') {
-    myRequestState = 'granted';
-  }
-  document.body.classList.toggle('read-only-mode', status.readOnly);
-  renderBanners();
-}
-
-// Transient outcomes (declined/timed-out/granted) shouldn't linger forever
-// once they've been seen.
-function setRequestResult(result) {
-  myRequestState = result;
-  renderBanners();
-  if (requestResultClearTimer) clearTimeout(requestResultClearTimer);
-  requestResultClearTimer = setTimeout(() => {
-    myRequestState = null;
-    renderBanners();
-  }, 5000);
-}
-
-async function initLockAndActivity() {
-  applyLockStatus(await window.api.lock.getStatus());
-  window.api.lock.onStatus(applyLockStatus);
-  window.api.lock.onIncomingRequest((payload) => {
-    incomingRequest = payload;
-    renderBanners();
-  });
-  window.api.lock.onRequestResult(({ result }) => setRequestResult(result));
+function initActivityBanner() {
   window.api.activity.onCountdown(({ remainingSeconds }) => {
     autoCloseRemaining = remainingSeconds;
     renderBanners();
@@ -418,7 +311,7 @@ function startApp() {
   buildNav();
   initSidebarToggle();
   initUpdateWidget();
-  initLockAndActivity();
+  initActivityBanner();
 }
 
 function applyProfile(profile) {

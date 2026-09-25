@@ -2,12 +2,17 @@ const INACTIVITY_LIMIT_SECONDS = 2 * 60 * 60; // 2 hours
 const WARNING_LEAD_SECONDS = 60; // show the countdown banner in the last minute
 
 // Auto-closes the app after a period with no input inside the BookBin window
-// specifically — not just anywhere on the machine — so leaving it open in
-// the background while using other apps doesn't keep the shared write lock
-// held indefinitely. The renderer pings 'activity:ping' on real mouse/
-// keyboard input (see renderer/app.js); clicking the countdown banner's
-// "Keep Open" button counts too, since it's just another click the same
-// listener sees, so no separate override channel is needed.
+// specifically — not just anywhere on the machine.
+//
+// This originally existed to stop an idle machine holding the shared write
+// lock forever. That lock is gone, so the remaining reason is narrower: an
+// unattended session left signed in is an unattended session, and closing it
+// ends it.
+//
+// The renderer pings 'activity:ping' on real mouse/keyboard input (see
+// renderer/app.js); clicking the countdown banner's "Keep Open" button counts
+// too, since it's just another click the same listener sees, so no separate
+// override channel is needed.
 module.exports = function registerActivityMonitor(ipcMain, getMainWindow, onAutoClose) {
   let lastActivityAt = Date.now();
   let warning = false;

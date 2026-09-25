@@ -1,8 +1,8 @@
-// Resolves where BookBin's data lives on disk. Defaults to the app's normal
-// per-machine userData folder, but a user can point this at a synced folder
-// (e.g. OneDrive) instead so multiple devices can share the same database and
-// logo. The chosen location is itself stored per-machine (in userData), since
-// each device needs to be told separately where the shared folder is.
+// Resolves where BookBin keeps its local files: the company logo and invoice
+// attachments. The database itself is no longer here -- it is in Postgres --
+// so this folder no longer needs to be shared between machines, and pointing
+// it at a synced folder is now a convenience rather than the way two people
+// work on the same data. The chosen location is stored per-machine.
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
@@ -36,15 +36,6 @@ function logoDir(workspaceDir) {
   return path.join(workspaceDir, 'logo');
 }
 
-// Rolling snapshots of the database, written on launch by whichever device
-// holds the write lock. They live inside the workspace so they travel through
-// the same folder sync as the database — the whole point is to have a clean,
-// self-consistent copy to fall back on if a sync leaves bookbin.db damaged or
-// missing a device's work.
-function backupsDir(workspaceDir) {
-  return path.join(workspaceDir, 'backups');
-}
-
 // kind is 'incoming' or 'outgoing' — kept in separate folders since both
 // invoice tables have their own id sequence and would otherwise collide.
 function attachmentsDir(workspaceDir, kind) {
@@ -56,7 +47,6 @@ function ensureWorkspaceDirs(workspaceDir) {
   fs.mkdirSync(logoDir(workspaceDir), { recursive: true });
   fs.mkdirSync(attachmentsDir(workspaceDir, 'incoming'), { recursive: true });
   fs.mkdirSync(attachmentsDir(workspaceDir, 'outgoing'), { recursive: true });
-  fs.mkdirSync(backupsDir(workspaceDir), { recursive: true });
 }
 
-module.exports = { getWorkspaceDir, setWorkspaceDir, ensureWorkspaceDirs, logoDir, attachmentsDir, backupsDir };
+module.exports = { getWorkspaceDir, setWorkspaceDir, ensureWorkspaceDirs, logoDir, attachmentsDir };

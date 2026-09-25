@@ -1,15 +1,20 @@
 const { app, dialog, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { setWorkspaceDir, ensureWorkspaceDirs, logoDir } = require('../workspace');
+const { setWorkspaceDir, ensureWorkspaceDirs, logoDir, attachmentsDir } = require('../workspace');
 
-module.exports = function registerWorkspace(ipcMain, db, currentWorkspaceDir) {
+// Where BookBin keeps its local files. This used to be how two machines shared
+// one database, and choosing a synced folder was the whole point; the database
+// is in Postgres now, so this folder holds only the company logo and invoice
+// attachments. Moving it therefore copies those files rather than a database,
+// and no longer has anything to do with how people share their work.
+module.exports = function registerWorkspace(ipcMain, currentWorkspaceDir) {
   ipcMain.handle('workspace:get', () => currentWorkspaceDir);
 
   ipcMain.handle('workspace:choose', async (event) => {
     const parentWindow = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(parentWindow, {
-      title: 'Choose Shared Workspace Folder',
+      title: 'Choose Folder for Logo and Attachments',
       defaultPath: currentWorkspaceDir,
       properties: ['openDirectory', 'createDirectory'],
     });
@@ -22,29 +27,25 @@ module.exports = function registerWorkspace(ipcMain, db, currentWorkspaceDir) {
 
     ensureWorkspaceDirs(newDir);
 
-    // First-time share setup: bring the existing database and logo along if
-    // the chosen folder doesn't already have its own (e.g. it's empty, as
-    // opposed to a folder another device already set up as the shared one).
-    //
-    // VACUUM INTO rather than copying bookbin.db: the database is open right
-    // now and anything committed since the last checkpoint lives in the -wal
-    // file, which a plain file copy would leave behind. VACUUM INTO writes
-    // everything committed as one self-contained file with no WAL beside it,
-    // which is also exactly the shape we want landing in a synced folder.
-    const oldDbPath = path.join(currentWorkspaceDir, 'bookbin.db');
-    const newDbPath = path.join(newDir, 'bookbin.db');
-    if (fs.existsSync(oldDbPath) && !fs.existsSync(newDbPath)) {
-      db.prepare('VACUUM INTO ?').run(newDbPath);
-      const oldLogoDir = logoDir(currentWorkspaceDir);
-      if (fs.existsSync(oldLogoDir)) {
-        fs.cpSync(oldLogoDir, logoDir(newDir), { recursive: true });
+    // Bring existing files along. Copied rather than moved, and only where the
+    // destination has nothing of its own: an invoice row points at a filename,
+    // so a file left behind is an attachment that silently fails to open.
+    const oldLogoDir = logoDir(currentWorkspaceDir);
+    if (fs.existsSync(oldLogoDir) && !fs.readdirSync(logoDir(newDir)).length) {
+      fs.cpSync(oldLogoDir, logoDir(newDir), { recursive: true });
+    }
+    for (const kind of ['incoming', 'outgoing']) {
+      const from = attachmentsDir(currentWorkspaceDir, kind);
+      const to = attachmentsDir(newDir, kind);
+      if (fs.existsSync(from) && !fs.readdirSync(to).length) {
+        fs.cpSync(from, to, { recursive: true });
       }
     }
 
     setWorkspaceDir(newDir);
+    // The folder is read once at startup and handed to each handler, so a
+    // restart is how the new location takes effect.
     app.relaunch();
-    // quit(), not exit(): exit() skips 'before-quit', which is where the old
-    // workspace's database gets checkpointed and closed.
     app.quit();
     return { ok: true, restarting: true };
   });

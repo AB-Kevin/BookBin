@@ -15,13 +15,13 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.1",
-    "better-sqlite3": "^13.0.3",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
     "electron": "^44.3.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "better-sqlite3": "^13.0.3"
   },
   "build": {
     "appId": "com.bookbin.app.dev",
@@ -30,7 +30,6 @@
       "main.js",
       "preload.js",
       "workspace.js",
-      "lock.js",
       "config/**/*",
       "db/**/*",
       "ipc/**/*",

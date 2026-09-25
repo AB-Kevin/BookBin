@@ -78,26 +78,6 @@ contextBridge.exposeInMainWorld('api', {
     delete: (id) => ipcRenderer.invoke('purchaseOrderItems:delete', id),
     invoices: (id) => ipcRenderer.invoke('purchaseOrderItems:invoices', id),
   },
-  lock: {
-    getStatus: () => ipcRenderer.invoke('lock:getStatus'),
-    requestAccess: () => ipcRenderer.invoke('lock:requestAccess'),
-    respondToRequest: (action) => ipcRenderer.invoke('lock:respondToRequest', action),
-    onStatus: (callback) => {
-      const listener = (_event, status) => callback(status);
-      ipcRenderer.on('lock:status', listener);
-      return () => ipcRenderer.removeListener('lock:status', listener);
-    },
-    onIncomingRequest: (callback) => {
-      const listener = (_event, payload) => callback(payload);
-      ipcRenderer.on('lock:incomingRequest', listener);
-      return () => ipcRenderer.removeListener('lock:incomingRequest', listener);
-    },
-    onRequestResult: (callback) => {
-      const listener = (_event, payload) => callback(payload);
-      ipcRenderer.on('lock:requestResult', listener);
-      return () => ipcRenderer.removeListener('lock:requestResult', listener);
-    },
-  },
   activity: {
     notify: () => ipcRenderer.send('activity:ping'),
     onCountdown: (callback) => {
