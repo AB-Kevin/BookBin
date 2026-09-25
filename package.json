@@ -24,8 +24,8 @@
     "better-sqlite3": "^13.0.3"
   },
   "build": {
-    "appId": "com.bookbin.app.dev",
-    "productName": "BookBin Dev",
+    "appId": "com.bookbin.app",
+    "productName": "BookBin",
     "files": [
       "main.js",
       "preload.js",
