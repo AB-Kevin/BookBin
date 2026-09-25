@@ -27,20 +27,24 @@ window.Screens.items = async function renderItems(container) {
       .reduce((sum, item) => sum + Number(item.quantity_on_hand || 0), 0);
     container.innerHTML = `
       <div class="page-header">
-        <h1>Items</h1>
+        ${window.Helpers.pageTitle('Items', 'Records')}
         <div class="header-actions">
-          <input type="search" id="item-search" class="search-input" placeholder="Search items…" value="${escapeHtml(searchTerm)}" />
-          <button class="btn" id="recalc-all">Recalculate All Costs</button>
-          <button class="btn primary" id="new-item">+ New Item</button>
+          <button class="btn" id="recalc-all">${window.Helpers.icon('refresh')}Recalculate all costs</button>
+          <button class="btn primary" id="new-item">${window.Helpers.icon('add')}New item</button>
         </div>
       </div>
       <section class="card stats-row">
         <div class="stat">
-          <div class="stat-label">Total Items In Stock</div>
+          <div class="stat-label">Items in stock</div>
           <div class="stat-value">${totalOnHand}</div>
         </div>
       </section>
       <section class="card">
+        <div class="card-toolbar">
+          ${window.Helpers.searchField('item-search', 'Search items…', searchTerm)}
+          <span class="spacer"></span>
+          <span class="toolbar-count">${rows.length === items.length ? '' : `${rows.length} of `}${items.length} item${items.length === 1 ? '' : 's'}</span>
+        </div>
         ${items.length === 0
           ? '<p class="muted">No items yet.</p>'
           : rows.length === 0
@@ -70,11 +74,11 @@ window.Screens.items = async function renderItems(container) {
                       <td class="num">${formatMoney(item.default_cost)}</td>
                       <td class="num">${formatMoney(item.default_price)}</td>
                       <td class="actions"><div class="actions-row">
-                        ${item.is_inventory ? `<button class="btn small" data-adjust="${item.id}">Adjust</button>` : ''}
-                        ${item.is_inventory ? `<button class="btn small" data-history="${item.id}">History</button>` : ''}
-                        <button class="btn small" data-cost="${item.id}">Cost</button>
-                        <button class="btn small" data-edit="${item.id}">Edit</button>
-                        <button class="btn small danger" data-delete="${item.id}">Delete</button>
+                        ${item.is_inventory ? `${window.Helpers.iconButton('tune', 'Adjust stock', `data-adjust="${item.id}"`)}` : ''}
+                        ${item.is_inventory ? `${window.Helpers.iconButton('history', 'Stock history', `data-history="${item.id}"`)}` : ''}
+                        ${window.Helpers.iconButton('calculate', 'Cost breakdown', `data-cost="${item.id}"`)}
+                        ${window.Helpers.iconButton('edit', 'Edit', `data-edit="${item.id}"`)}
+                        ${window.Helpers.iconButton('delete', 'Delete', `data-delete="${item.id}"`, 'danger')}
                       </div></td>
                     </tr>
                   `)

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeTheme } = require('electron');
 const path = require('path');
 
 const registerItems = require('./ipc/items');
@@ -9,6 +9,7 @@ const registerSettings = require('./ipc/settings');
 const registerDashboard = require('./ipc/dashboard');
 const registerUpdates = require('./ipc/updates');
 const registerShell = require('./ipc/shell');
+const registerTheme = require('./ipc/theme');
 const registerCosting = require('./ipc/costing');
 const {
   registerPurchaseOrders,
@@ -40,6 +41,9 @@ function createWindow() {
     minWidth: 640,
     minHeight: 480,
     icon: path.join(__dirname, 'build', 'BookBin-512.png'),
+    // The page background of the OS theme, so the first paint does not flash
+    // white behind a dark page. The renderer takes over from there.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121512' : '#f7f6f2',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -61,6 +65,7 @@ app.whenReady().then(() => {
   registerDashboard(ipcMain);
   registerUpdates(ipcMain, () => mainWindow);
   registerShell(ipcMain);
+  registerTheme(ipcMain);
   registerCosting(ipcMain);
   registerPurchaseOrders(ipcMain);
   registerPurchaseOrderItems(ipcMain);

@@ -91,14 +91,14 @@ window.Screens.users = async function renderUsers(container) {
     if (lock.unlocked) {
       return `
         <div class="lock-bar unlocked">
-          <span class="lock-text">🔓 Unlocked — locks again in <strong id="lock-countdown">${formatRemaining(lock.remainingMs)}</strong></span>
+          <span class="lock-text">${window.Helpers.icon('lock_open')}Unlocked — locks again in <strong id="lock-countdown">${formatRemaining(lock.remainingMs)}</strong></span>
           <button type="button" class="btn small" id="lock-now">Lock now</button>
         </div>
       `;
     }
     return `
       <div class="lock-bar">
-        <span class="lock-text">🔒 Enter your password to add, remove or change accounts.</span>
+        <span class="lock-text">${window.Helpers.icon('lock')}Enter your password to add, remove or change accounts.</span>
         <form id="unlock-form">
           <input name="password" type="password" autocomplete="current-password" placeholder="Your password" required />
           <button type="submit" class="btn primary small" id="unlock-btn">Unlock</button>
@@ -115,7 +115,7 @@ window.Screens.users = async function renderUsers(container) {
       <section class="card">
         <div class="page-header">
           <h2 style="margin: 0;">All Accounts</h2>
-          <button class="btn primary" id="new-user" ${disabled}>+ New User</button>
+          <button class="btn primary" id="new-user" ${disabled}>${window.Helpers.icon('add')}New user</button>
         </div>
         ${lockBarHtml()}
         <p class="muted small">
@@ -157,7 +157,7 @@ window.Screens.users = async function renderUsers(container) {
 
   function render() {
     container.innerHTML = `
-      <div class="page-header"><h1>Users</h1></div>
+      ${window.Helpers.pageTitle('Users', 'Admin')}
       ${accountCardHtml()}
       ${isOwner ? accountsCardHtml() : ''}
     `;

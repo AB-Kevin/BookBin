@@ -9,7 +9,7 @@ window.Screens.incomingInvoices = async function renderIncomingInvoices(containe
 };
 
 async function renderList(container) {
-  const { escapeHtml, formatMoney, formatDate, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState } = window.Helpers;
+  const { escapeHtml, formatMoney, formatDate, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState, icon, iconButton, pageTitle, searchField } = window.Helpers;
 
   let invoices = [];
   let searchTerm = '';
@@ -19,6 +19,18 @@ async function renderList(container) {
   async function load() {
     invoices = await window.api.incomingInvoices.list();
     render();
+  }
+
+  // Received / Paid, as a pill that toggles on click.
+  function flagPill(inv, flag) {
+    const attrs = `type="button" data-flag="${flag}" data-id="${inv.id}"`;
+    if (inv[flag]) {
+      const label = flag === 'received' ? 'Received' : 'Paid';
+      return `<button ${attrs} class="pill on" title="Mark as not ${label.toLowerCase()}">${icon('check')}${label}</button>`;
+    }
+    return flag === 'received'
+      ? `<button ${attrs} class="pill pending" title="Mark as received">${icon('schedule')}Pending</button>`
+      : `<button ${attrs} class="pill off" title="Mark as paid">Unpaid</button>`;
   }
 
   function vendorFilterOptions() {
@@ -58,58 +70,65 @@ async function renderList(container) {
 
     const lastMonthTotal = totalSince(oneMonthAgo);
     const last6MonthsTotal = totalSince(sixMonthsAgo);
+    const awaitingReceipt = invoices.filter((inv) => !inv.received).length;
 
     container.innerHTML = `
       <div class="page-header">
-        <h1>Incoming Invoices</h1>
-        <div class="header-actions">
-          <input type="search" id="invoice-search" class="search-input" placeholder="Search invoice # or item…" value="${escapeHtml(searchTerm)}" />
-          <select id="vendor-filter" class="search-input">
-            <option value="">All Vendors</option>
-            ${vendorFilterOptions()}
-          </select>
-          <button class="btn primary" id="new-invoice">+ New Invoice</button>
-        </div>
+        ${pageTitle('Incoming invoices', 'Transactions')}
+        <button class="btn primary" id="new-invoice">${icon('add')}New invoice</button>
       </div>
       <section class="card stats-row">
         <div class="stat">
-          <div class="stat-label">Last Month Total</div>
+          <div class="stat-label">Last month</div>
           <div class="stat-value">${formatMoney(lastMonthTotal)}</div>
         </div>
         <div class="stat">
-          <div class="stat-label">Last 6 Months Total</div>
+          <div class="stat-label">Last 6 months</div>
           <div class="stat-value">${formatMoney(last6MonthsTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Awaiting receipt</div>
+          <div class="stat-value ${awaitingReceipt ? 'warn' : ''}">${awaitingReceipt}</div>
         </div>
       </section>
       <section class="card">
+        <div class="card-toolbar">
+          ${searchField('invoice-search', 'Search invoice # or item…', searchTerm)}
+          <select id="vendor-filter" class="search-input">
+            <option value="">All vendors</option>
+            ${vendorFilterOptions()}
+          </select>
+          <span class="spacer"></span>
+          <span class="toolbar-count">${rows.length === invoices.length ? '' : `${rows.length} of `}${invoices.length} invoice${invoices.length === 1 ? '' : 's'}</span>
+        </div>
         ${invoices.length === 0
           ? '<p class="muted">No incoming invoices yet.</p>'
           : rows.length === 0
-          ? '<p class="muted">No invoices match your search/filter.</p>'
+          ? '<p class="muted">No invoices match your search.</p>'
           : `<table>
               <thead><tr>
                 ${sortableHeader('#', 'invoice_number', sortState)}
                 ${sortableHeader('Vendor', 'vendor_name', sortState)}
                 ${sortableHeader('Date', 'invoice_date', sortState)}
                 ${sortableHeader('Total', 'total', sortState, 'num')}
-                ${sortableHeader('Received', 'received', sortState, 'checkbox-col')}
-                ${sortableHeader('Paid', 'paid', sortState, 'checkbox-col')}
+                ${sortableHeader('Received', 'received', sortState)}
+                ${sortableHeader('Paid', 'paid', sortState)}
                 <th></th>
               </tr></thead>
               <tbody>
                 ${rows
                   .map((inv) => `
                     <tr>
-                      <td>${escapeHtml(inv.invoice_number)}</td>
+                      <td class="mono">${escapeHtml(inv.invoice_number)}</td>
                       <td>${escapeHtml(inv.vendor_name || '—')}</td>
-                      <td>${formatDate(inv.invoice_date)}</td>
+                      <td class="muted">${formatDate(inv.invoice_date)}</td>
                       <td class="num">${formatMoney(inv.total)}</td>
-                      <td class="checkbox-col"><input type="checkbox" data-flag="received" data-id="${inv.id}" ${inv.received ? 'checked' : ''} /></td>
-                      <td class="checkbox-col"><input type="checkbox" data-flag="paid" data-id="${inv.id}" ${inv.paid ? 'checked' : ''} /></td>
+                      <td>${flagPill(inv, 'received')}</td>
+                      <td>${flagPill(inv, 'paid')}</td>
                       <td class="actions"><div class="actions-row">
-                        ${inv.attachment_path ? `<button class="btn small" data-view-attachment="${inv.id}">📎 View</button>` : ''}
-                        <button class="btn small" data-edit="${inv.id}">Edit</button>
-                        <button class="btn small danger" data-delete="${inv.id}">Delete</button>
+                        ${inv.attachment_path ? iconButton('attach_file', 'View attachment', `data-view-attachment="${inv.id}"`) : ''}
+                        ${iconButton('edit', 'Edit', `data-edit="${inv.id}"`)}
+                        ${iconButton('delete', 'Delete', `data-delete="${inv.id}"`, 'danger')}
                       </div></td>
                     </tr>
                   `)
@@ -147,20 +166,22 @@ async function renderList(container) {
         load();
       })
     );
-    qsa('[data-flag]', container).forEach((checkbox) =>
-      checkbox.addEventListener('change', async () => {
-        const id = Number(checkbox.dataset.id);
-        const row = checkbox.closest('tr');
-        const paid = row.querySelector('[data-flag="paid"]').checked;
-        const received = row.querySelector('[data-flag="received"]').checked;
-        checkbox.disabled = true;
+    qsa('[data-flag]', container).forEach((pill) =>
+      pill.addEventListener('click', async () => {
+        const inv = invoices.find((i) => i.id === Number(pill.dataset.id));
+        if (!inv) return;
+        const flag = pill.dataset.flag;
+        const flags = { paid: Boolean(inv.paid), received: Boolean(inv.received), [flag]: !inv[flag] };
+        pill.disabled = true;
         try {
-          await window.api.incomingInvoices.setFlags(id, { paid, received });
-          const inv = invoices.find((i) => i.id === id);
-          if (inv) { inv.paid = paid; inv.received = received; }
+          await window.api.incomingInvoices.setFlags(inv.id, flags);
+          inv.paid = flags.paid;
+          inv.received = flags.received;
         } finally {
-          checkbox.disabled = false;
+          pill.disabled = false;
         }
+        // Redraws the pill, and the "Awaiting receipt" count above it.
+        render();
       })
     );
     wireSortableHeaders(container, sortState, render);
@@ -210,11 +231,11 @@ async function renderForm(container, invoiceId) {
 
   container.innerHTML = `
     <div class="page-header">
-      <h1>${isEdit ? `Edit Invoice ${escapeHtml(invoice.invoice_number)}` : 'New Incoming Invoice'}</h1>
+      ${window.Helpers.pageTitle(isEdit ? `Invoice ${escapeHtml(invoice.invoice_number)}` : 'New incoming invoice', 'Incoming invoices')}
       ${isEdit ? `
         <div class="invoice-nav">
-          <button type="button" class="btn small" id="prev-invoice" ${prevInvoice ? '' : 'disabled'}>◀ Previous</button>
-          <button type="button" class="btn small" id="next-invoice" ${nextInvoice ? '' : 'disabled'}>Next ▶</button>
+          <button type="button" class="btn small" id="prev-invoice" ${prevInvoice ? '' : 'disabled'}>${window.Helpers.icon('chevron_left')}Previous</button>
+          <button type="button" class="btn small" id="next-invoice" ${nextInvoice ? '' : 'disabled'}>Next${window.Helpers.icon('chevron_right')}</button>
         </div>
       ` : ''}
     </div>
@@ -291,7 +312,7 @@ async function renderForm(container, invoiceId) {
     const row = qs('#attachment-row', container);
     if (pendingAttachmentName) {
       row.innerHTML = `
-        <span class="attachment-name">📎 ${escapeHtml(pendingAttachmentName)} <span class="muted small">(new)</span></span>
+        <span class="attachment-name">${window.Helpers.icon('attach_file')} ${escapeHtml(pendingAttachmentName)} <span class="muted small">(new)</span></span>
         <button type="button" class="btn small" id="choose-attachment">Replace…</button>
         <button type="button" class="btn small" id="clear-pending-attachment">Cancel</button>
       `;
@@ -302,7 +323,7 @@ async function renderForm(container, invoiceId) {
       `;
     } else if (invoice?.attachment_name) {
       row.innerHTML = `
-        <span class="attachment-name">📎 ${escapeHtml(invoice.attachment_name)}</span>
+        <span class="attachment-name">${window.Helpers.icon('attach_file')} ${escapeHtml(invoice.attachment_name)}</span>
         <button type="button" class="btn small" id="view-attachment">View</button>
         <button type="button" class="btn small" id="choose-attachment">Replace…</button>
         <button type="button" class="btn small danger" id="remove-attachment">Remove</button>

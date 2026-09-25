@@ -96,6 +96,9 @@ contextBridge.exposeInMainWorld('api', {
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   },
+  theme: {
+    set: (mode) => ipcRenderer.invoke('theme:set', mode),
+  },
   costing: {
     recalculateItem: (itemId) => ipcRenderer.invoke('costing:recalculateItem', itemId),
     recalculateAll: () => ipcRenderer.invoke('costing:recalculateAll'),

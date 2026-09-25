@@ -15,8 +15,8 @@ window.Screens.vendors = async function renderVendors(container) {
     const rows = sortedRows(vendors, sortState);
     container.innerHTML = `
       <div class="page-header">
-        <h1>Vendors</h1>
-        <button class="btn primary" id="new-vendor">+ New Vendor</button>
+        ${window.Helpers.pageTitle('Vendors', 'Records')}
+        <button class="btn primary" id="new-vendor">${window.Helpers.icon('add')}New vendor</button>
       </div>
       <section class="card">
         ${vendors.length === 0
@@ -38,8 +38,8 @@ window.Screens.vendors = async function renderVendors(container) {
                       <td>${escapeHtml(v.email || '')}</td>
                       <td>${escapeHtml(v.phone || '')}</td>
                       <td class="actions"><div class="actions-row">
-                        <button class="btn small" data-edit="${v.id}">Edit</button>
-                        <button class="btn small danger" data-delete="${v.id}">Delete</button>
+                        ${window.Helpers.iconButton('edit', 'Edit', `data-edit="${v.id}"`)}
+                        ${window.Helpers.iconButton('delete', 'Delete', `data-delete="${v.id}"`, 'danger')}
                       </div></td>
                     </tr>
                   `)

@@ -38,12 +38,36 @@ function linkify(text) {
 
 function formatMoney(n) {
   const num = Number(n || 0);
-  return `$${num.toFixed(2)}`;
+  const sign = num < 0 ? '-' : '';
+  return `${sign}$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// "Sep 20, 2026". Display only -- date inputs still take the raw ISO string.
 function formatDate(isoLike) {
   if (!isoLike) return '';
-  return String(isoLike).slice(0, 10);
+  const iso = String(isoLike).slice(0, 10);
+  const date = new Date(`${iso}T00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// A Material Symbols glyph (see the icon-font note in styles.css).
+function icon(name, extraClass) {
+  return `<span class="icon${extraClass ? ` ${extraClass}` : ''}" aria-hidden="true">${name}</span>`;
+}
+
+// Icon-only row action. `attrs` is raw attribute text (data-*, disabled).
+function iconButton(iconName, label, attrs, extraClass) {
+  return `<button type="button" class="icon-btn${extraClass ? ` ${extraClass}` : ''}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" ${attrs || ''}>${icon(iconName)}</button>`;
+}
+
+// Page heading with the small line above it. `titleHtml` is already escaped.
+function pageTitle(titleHtml, eyebrow) {
+  return `<div class="page-title">${eyebrow ? `<div class="eyebrow">${escapeHtml(eyebrow)}</div>` : ''}<h1>${titleHtml}</h1></div>`;
+}
+
+function searchField(id, placeholder, value) {
+  return `<label class="search-field">${icon('search')}<input type="search" id="${id}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value)}" /></label>`;
 }
 
 function todayIso() {
@@ -162,7 +186,7 @@ function sortedRows(rows, sortState) {
 
 function sortableHeader(label, key, sortState, extraClass) {
   const active = sortState && sortState.key === key;
-  const arrow = active ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const arrow = active ? icon(sortState.dir === 'asc' ? 'arrow_upward' : 'arrow_downward', 'sort-arrow') : '';
   const cls = ['sortable', extraClass, active ? 'sorted' : ''].filter(Boolean).join(' ');
   return `<th class="${cls}" data-sort-key="${escapeHtml(key)}">${escapeHtml(label)}${arrow}</th>`;
 }
@@ -187,6 +211,10 @@ window.Helpers = {
   linkify,
   formatMoney,
   formatDate,
+  icon,
+  iconButton,
+  pageTitle,
+  searchField,
   todayIso,
   qs,
   qsa,

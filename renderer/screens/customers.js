@@ -15,8 +15,8 @@ window.Screens.customers = async function renderCustomers(container) {
     const rows = sortedRows(customers, sortState);
     container.innerHTML = `
       <div class="page-header">
-        <h1>Customers</h1>
-        <button class="btn primary" id="new-customer">+ New Customer</button>
+        ${window.Helpers.pageTitle('Customers', 'Records')}
+        <button class="btn primary" id="new-customer">${window.Helpers.icon('add')}New customer</button>
       </div>
       <section class="card">
         ${customers.length === 0
@@ -38,8 +38,8 @@ window.Screens.customers = async function renderCustomers(container) {
                       <td>${escapeHtml(c.email || '')}</td>
                       <td>${escapeHtml(c.phone || '')}</td>
                       <td class="actions"><div class="actions-row">
-                        <button class="btn small" data-edit="${c.id}">Edit</button>
-                        <button class="btn small danger" data-delete="${c.id}">Delete</button>
+                        ${window.Helpers.iconButton('edit', 'Edit', `data-edit="${c.id}"`)}
+                        ${window.Helpers.iconButton('delete', 'Delete', `data-delete="${c.id}"`, 'danger')}
                       </div></td>
                     </tr>
                   `)

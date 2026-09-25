@@ -9,7 +9,7 @@
 // single row is settled by row-level security in the database.
 
 (function () {
-  const { escapeHtml, showModal, hideModal, confirmAction } = window.Helpers;
+  const { escapeHtml, showModal, hideModal, confirmAction, icon, iconButton } = window.Helpers;
 
   let onSignedIn = () => {};
   let unsubscribeProgress = null;
@@ -22,19 +22,26 @@
     return root().querySelector(selector);
   }
 
-  // Every view shares the card, the brand and the update footer.
-  function frame(inner, { wide = false } = {}) {
+  // Every view shares the brand, the update footer and the theme toggle.
+  // `subtitle` is HTML (already escaped). `bare` drops the card behind the
+  // content, for the database list, which draws its own.
+  function frame(subtitle, inner, { wide = false, bare = false } = {}) {
     root().innerHTML = `
-      <div class="login-card ${wide ? 'launcher-wide' : ''}">
-        <div class="login-brand">
-          <span class="login-icon">📒</span>
-          <span class="login-title">BookBin</span>
+      <button class="icon-btn launcher-theme" type="button" data-theme-toggle>${icon('dark_mode')}</button>
+      <div class="launcher ${wide ? 'launcher-wide' : ''}">
+        <div class="launcher-brand">
+          <span class="logo-mark">${icon('auto_stories')}</span>
+          <div>
+            <div class="login-title">BookBin</div>
+            <p class="login-sub">${subtitle}</p>
+          </div>
         </div>
-        ${inner}
+        <div class="login-card ${bare ? 'bare' : ''}">${inner}</div>
         <div class="launcher-footer" data-update-widget></div>
       </div>
     `;
     if (window.renderUpdateWidgets) window.renderUpdateWidgets();
+    if (window.Theme) window.Theme.apply();
   }
 
   function setError(message) {
@@ -66,8 +73,7 @@
     window.CurrentDatabase = null;
     const list = await window.api.databases.list();
 
-    frame(`
-      <p class="login-sub">Choose a database</p>
+    frame('Choose a database', `
       ${list.length === 0
         ? '<p class="muted small launcher-empty">No databases yet. Add one you have been given, or set up a new one.</p>'
         : `<ul class="db-list">
@@ -75,20 +81,27 @@
               .map((db) => `
                 <li class="db-item ${db.isLastUsed ? 'last-used' : ''}">
                   <button type="button" class="db-open" data-open="${db.id}">
-                    <span class="db-name">${escapeHtml(db.name)}</span>
-                    <span class="db-host">${escapeHtml(hostOf(db.url))}${db.hasSavedSession ? ' · signed in' : ''}</span>
+                    <span class="db-icon">${icon('database')}</span>
+                    <span class="db-text">
+                      <span class="db-name-row">
+                        <span class="db-name">${escapeHtml(db.name)}</span>
+                        ${db.hasSavedSession ? '<span class="db-status">Signed in</span>' : ''}
+                      </span>
+                      <span class="db-host">${escapeHtml(hostOf(db.url))}</span>
+                    </span>
+                    ${icon('arrow_forward', 'db-arrow')}
                   </button>
-                  <button type="button" class="db-menu" data-menu="${db.id}" title="More" aria-label="More options for ${escapeHtml(db.name)}">⋯</button>
+                  ${iconButton('more_horiz', `More options for ${db.name}`, `data-menu="${db.id}"`, 'db-menu')}
                 </li>
               `)
               .join('')}
           </ul>`}
       <div class="login-error" id="launcher-error" role="alert">${errorMessage ? escapeHtml(errorMessage) : ''}</div>
       <div class="launcher-actions">
-        <button type="button" class="btn" id="add-db">Add a database</button>
-        <button type="button" class="btn" id="setup-db">Set up a new one</button>
+        <button type="button" class="btn" id="add-db">${icon('link')}Add a database</button>
+        <button type="button" class="btn" id="setup-db">${icon('add')}Set up a new one</button>
       </div>
-    `, { wide: true });
+    `, { wide: true, bare: true });
 
     root().querySelectorAll('[data-open]').forEach((btn) =>
       btn.addEventListener('click', () => openDatabase(btn.dataset.open, btn))
@@ -212,8 +225,7 @@
 
   function showAdd(mode = 'code') {
     const byCode = mode === 'code';
-    frame(`
-      <p class="login-sub">Add a database</p>
+    frame(`Add a database`, `
       <form id="add-form" novalidate>
         ${byCode
           ? `<label class="login-label" for="add-code">Connection code</label>
@@ -268,8 +280,7 @@
   const NEW_PROJECT_URL = 'https://supabase.com/dashboard/new';
 
   function showSetup() {
-    frame(`
-      <p class="login-sub">Set up a new database</p>
+    frame(`Set up a new database`, `
       <ol class="setup-steps">
         <li>Create an empty project at
           <a href="#" data-ext-link="${NEW_PROJECT_URL}">supabase.com</a>. The free plan is fine.
@@ -316,8 +327,7 @@
   }
 
   function showProjectPicker(token, projects) {
-    frame(`
-      <p class="login-sub">Which project?</p>
+    frame(`Which project?`, `
       ${projects.length === 0
         ? `<p class="muted small launcher-empty">That account has no projects yet. Create one at
              <a href="#" data-ext-link="${NEW_PROJECT_URL}">supabase.com</a>, then come back.</p>`
@@ -326,8 +336,12 @@
               .map((p) => `
                 <li class="db-item">
                   <button type="button" class="db-open" data-ref="${escapeHtml(p.ref)}">
-                    <span class="db-name">${escapeHtml(p.name)}</span>
-                    <span class="db-host">${escapeHtml(p.ref)} · ${escapeHtml(p.region || '')}${p.status === 'ACTIVE_HEALTHY' ? '' : ` · ${escapeHtml(p.status)}`}</span>
+                    <span class="db-icon">${icon('database')}</span>
+                    <span class="db-text">
+                      <span class="db-name">${escapeHtml(p.name)}</span>
+                      <span class="db-host">${escapeHtml(p.ref)} · ${escapeHtml(p.region || '')}${p.status === 'ACTIVE_HEALTHY' ? '' : ` · ${escapeHtml(p.status)}`}</span>
+                    </span>
+                    ${icon('arrow_forward', 'db-arrow')}
                   </button>
                 </li>
               `)
@@ -335,7 +349,7 @@
           </ul>`}
       <div class="login-error" id="launcher-error" role="alert"></div>
       <div class="launcher-links"><a href="#" id="back-link">← Back</a></div>
-    `, { wide: true });
+    `, { wide: true, bare: projects.length > 0 });
 
     $('#back-link').addEventListener('click', (e) => {
       e.preventDefault();
@@ -367,8 +381,7 @@
 
   function showSetupDetails(token, project) {
     const needsOwner = !project.hasOwner;
-    frame(`
-      <p class="login-sub">${escapeHtml(project.name)}</p>
+    frame(`${escapeHtml(project.name)}`, `
       ${project.alreadySetUp
         ? `<p class="muted small">This project already has BookBin's tables, and everything in
              them is kept. Setup will ${project.pending.length
@@ -449,8 +462,7 @@
   }
 
   function showSetupDone(result, ownerEmail) {
-    frame(`
-      <p class="login-sub">${result.alreadySetUp ? 'Database updated' : 'Your database is ready'}</p>
+    frame(`${result.alreadySetUp ? 'Database updated' : 'Your database is ready'}`, `
       <p class="muted small">
         ${result.updatedTables ? `The database's tables were updated (${result.updatedTables} change${result.updatedTables === 1 ? '' : 's'}). ` : ''}
         ${result.createdOwner ? 'Your owner account has been created. ' : ''}
@@ -482,8 +494,7 @@
       return;
     }
     submitting = false;
-    frame(`
-      <p class="login-sub">Sign in to <strong>${escapeHtml(db.name)}</strong></p>
+    frame(`Sign in to <strong>${escapeHtml(db.name)}</strong>`, `
       <form id="login-form" autocomplete="on" novalidate>
         <label class="login-label" for="login-email">Email</label>
         <input class="login-input" id="login-email" name="email" type="email"

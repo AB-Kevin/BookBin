@@ -25,7 +25,7 @@ window.Screens.settings = async function renderSettings(container) {
 
   function render() {
     container.innerHTML = `
-      <h1>Settings</h1>
+      ${window.Helpers.pageTitle('Settings', 'Admin')}
       <form id="settings-form" class="card">
         <h2>Company Profile</h2>
         <label>Company Name<input name="company_name" value="${escapeHtml(settings.company_name || '')}" /></label>

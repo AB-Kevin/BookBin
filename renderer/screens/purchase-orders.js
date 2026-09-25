@@ -57,8 +57,8 @@ async function renderOrdersList(container) {
     const rows = sortedRows(orders, sortState);
     container.innerHTML = `
       <div class="page-header">
-        <h1>Purchase Orders</h1>
-        <button class="btn primary" id="new-order">+ New Purchase Order</button>
+        ${window.Helpers.pageTitle('Purchase orders', 'Transactions')}
+        <button class="btn primary" id="new-order">${window.Helpers.icon('add')}New purchase order</button>
       </div>
       <section class="card">
         ${orders.length === 0
@@ -88,12 +88,12 @@ async function renderOrdersList(container) {
                         ? ''
                         : po.vendor_todo === 0 ? '<span class="muted">All done</span>' : `${po.vendor_todo} to do`}</td>
                       <td class="actions"><div class="actions-row">
-                        <button class="btn small" data-edit="${po.id}">Edit</button>
+                        ${window.Helpers.iconButton('edit', 'Edit', `data-edit="${po.id}"`)}
                         <button class="btn small" data-rename="${po.id}">Rename</button>
                         ${po.status === 'open'
                           ? `<button class="btn small" data-complete="${po.id}">Complete</button>`
                           : `<button class="btn small" data-reopen="${po.id}">Reopen</button>`}
-                        <button class="btn small danger" data-delete="${po.id}">Delete</button>
+                        ${window.Helpers.iconButton('delete', 'Delete', `data-delete="${po.id}"`, 'danger')}
                       </div></td>
                     </tr>
                   `)
@@ -226,7 +226,7 @@ async function renderLinesList(container, poId) {
       <section class="card">
         <div class="page-header">
           <h2 style="margin: 0;">Vendor Orders</h2>
-          ${!isClosed && !vendorOrdersError ? '<button class="btn" id="track-vendor">+ Track Vendor</button>' : ''}
+          ${!isClosed && !vendorOrdersError ? `<button class="btn" id="track-vendor">${window.Helpers.icon('add')}Track vendor</button>` : ''}
         </div>
         ${body}
       </section>
@@ -321,14 +321,14 @@ async function renderLinesList(container, poId) {
     container.innerHTML = `
       <div class="page-header">
         <div>
-          <a href="#" id="back-link" class="back-link">← Purchase Orders</a>
+          <a href="#" id="back-link" class="back-link">${window.Helpers.icon('chevron_left')}Purchase orders</a>
           <h1>${escapeHtml(po.name)} <span class="badge status-${po.status}">${escapeHtml(po.status)}</span></h1>
         </div>
         <div class="header-actions">
           <button class="btn" id="rename-btn">Rename</button>
           ${isClosed
             ? '<button class="btn" id="reopen-btn">Reopen</button>'
-            : '<button class="btn" id="complete-btn">Complete</button><button class="btn primary" id="new-line">+ New Line</button>'}
+            : `<button class="btn" id="complete-btn">Complete</button><button class="btn primary" id="new-line">${window.Helpers.icon('add')}New line</button>`}
         </div>
       </div>
       ${isClosed ? '<p class="muted small">This purchase order is closed — its bought counts are frozen and its lines can\'t be changed until it\'s reopened.</p>' : ''}
@@ -369,8 +369,8 @@ async function renderLinesList(container, poId) {
                         <td class="num"><span class="progress-badge">${bought}/${wanted}</span></td>
                         <td class="actions"><div class="actions-row">
                           ${!isClosed ? `
-                            <button class="btn small" data-edit="${line.id}">Edit</button>
-                            <button class="btn small danger" data-delete="${line.id}">Delete</button>
+                            ${window.Helpers.iconButton('edit', 'Edit', `data-edit="${line.id}"`)}
+                            ${window.Helpers.iconButton('delete', 'Delete', `data-delete="${line.id}"`, 'danger')}
                           ` : ''}
                         </div></td>
                       </tr>
@@ -657,8 +657,8 @@ async function renderLineForm(container, poId, lineId) {
     .join('');
 
   container.innerHTML = `
-    <a href="#" id="back-link" class="back-link">← ${escapeHtml(po.name)}</a>
-    <h1>${isEdit ? 'Edit Purchase Order Item' : 'New Purchase Order Item'}</h1>
+    <a href="#" id="back-link" class="back-link">${window.Helpers.icon('chevron_left')}${escapeHtml(po.name)}</a>
+    ${window.Helpers.pageTitle(isEdit ? 'Edit line' : 'New line')}
     <form id="po-form" class="card">
       <label>Book/Item
         <select name="item_id" required>${itemOptions(line?.item_id || null)}</select>

@@ -4,31 +4,46 @@
 //   #/incoming-invoices/new
 //   #/incoming-invoices/5
 
-const NAV_ITEMS = [
-  { path: 'dashboard', label: 'Dashboard', icon: '🏠' },
-  { path: 'items', label: 'Items', icon: '📦' },
-  { path: 'vendors', label: 'Vendors', icon: '🏭' },
-  { path: 'customers', label: 'Customers', icon: '👥' },
-  { path: 'incoming-invoices', label: 'Incoming Invoices', icon: '📥' },
-  { path: 'outgoing-invoices', label: 'Outgoing Invoices', icon: '📤' },
-  { path: 'purchase-orders', label: 'Purchase Orders', icon: '📝' },
-  { path: 'settings', label: 'Settings', icon: '⚙️' },
-  // Everyone gets this page for their own password; only owners see the
-  // account controls on it. Hiding those is presentation only -- the main
-  // process, the database and the Edge Function are what refuse a manager.
-  { path: 'users', label: 'Users', icon: '👤' },
+// Icons are Material Symbols names (see the icon-font note in styles.css).
+const NAV_GROUPS = [
+  { label: 'Overview', items: [
+    { path: 'dashboard', label: 'Dashboard', icon: 'space_dashboard' },
+  ] },
+  { label: 'Records', items: [
+    { path: 'items', label: 'Items', icon: 'menu_book' },
+    { path: 'vendors', label: 'Vendors', icon: 'storefront' },
+    { path: 'customers', label: 'Customers', icon: 'group' },
+  ] },
+  { label: 'Transactions', items: [
+    { path: 'incoming-invoices', label: 'Incoming invoices', icon: 'move_to_inbox' },
+    { path: 'outgoing-invoices', label: 'Outgoing invoices', icon: 'outbox' },
+    { path: 'purchase-orders', label: 'Purchase orders', icon: 'receipt_long' },
+  ] },
+  { label: 'Admin', items: [
+    { path: 'settings', label: 'Settings', icon: 'settings' },
+    // Everyone gets this page for their own password; only owners see the
+    // account controls on it. Hiding those is presentation only -- the main
+    // process, the database and the Edge Function are what refuse a manager.
+    { path: 'users', label: 'Users', icon: 'manage_accounts' },
+  ] },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = 'bookbin.sidebarCollapsed';
 
 function buildNav() {
   const nav = document.getElementById('nav');
+  const { icon } = window.Helpers;
   const isOwner = !!currentProfile && currentProfile.role === 'owner';
-  nav.innerHTML = NAV_ITEMS.filter((item) => !item.ownerOnly || isOwner).map(
-    (item) => `<a class="nav-link" href="#/${item.path}" data-section="${item.path}" title="${item.label}">
-      <span class="nav-icon">${item.icon}</span><span class="nav-label">${item.label}</span>
-    </a>`
-  ).join('');
+  nav.innerHTML = NAV_GROUPS.map((group) => {
+    const items = group.items.filter((item) => !item.ownerOnly || isOwner);
+    if (items.length === 0) return '';
+    return `<div class="nav-group">
+      <div class="nav-group-label">${group.label}</div>
+      ${items.map((item) => `<a class="nav-link" href="#/${item.path}" data-section="${item.path}" title="${item.label}">
+        ${icon(item.icon)}<span class="nav-label">${item.label}</span>
+      </a>`).join('')}
+    </div>`;
+  }).join('');
   // Routed through navigate() (not the native hash link) so a dirty form's
   // save-prompt guard applies to sidebar clicks too, not just in-screen buttons.
   nav.querySelectorAll('.nav-link').forEach((link) => {
@@ -276,7 +291,7 @@ function renderBanners() {
 
   root.innerHTML = `
     <div class="banner banner-autoclose">
-      ⏳ BookBin will close in ${autoCloseRemaining}s due to inactivity.
+      ${window.Helpers.icon('schedule')} BookBin will close in ${autoCloseRemaining}s due to inactivity.
       <button type="button" class="btn small" id="keep-open-btn">Keep Open</button>
     </div>
   `;
@@ -300,6 +315,14 @@ function initActivityBanner() {
   });
 }
 
+// "Kevin Beachy" -> "KB"; an email falls back to its first letter.
+function initials(name) {
+  const words = String(name).replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  const letters = words.length === 1 ? words[0][0] : words[0][0] + words[words.length - 1][0];
+  return letters.toUpperCase();
+}
+
 function renderUserWidget() {
   const box = document.getElementById('sidebar-user');
   if (!box) return;
@@ -307,17 +330,20 @@ function renderUserWidget() {
     box.innerHTML = '';
     return;
   }
-  const { escapeHtml } = window.Helpers;
+  const { escapeHtml, iconButton } = window.Helpers;
   const name = currentProfile.fullName || currentProfile.email || 'Signed in';
   const role = currentProfile.role === 'owner' ? 'Owner' : 'Manager';
   const database = window.CurrentDatabase;
   box.innerHTML = `
-    <div class="user-row" title="${escapeHtml(currentProfile.email || '')}">
-      <span class="user-name">${escapeHtml(name)}</span>
-      <span class="user-role">${escapeHtml(role)}${database ? ` · ${escapeHtml(database.name)}` : ''}</span>
+    <div class="user-row">
+      <div class="avatar" title="${escapeHtml(name)}">${escapeHtml(initials(name))}</div>
+      <div class="user-text" title="${escapeHtml(currentProfile.email || '')}">
+        <span class="user-name">${escapeHtml(name)}</span>
+        <span class="user-role">${escapeHtml(role)}${database ? ` · ${escapeHtml(database.name)}` : ''}</span>
+      </div>
+      ${iconButton('swap_horiz', 'Switch database', 'id="switch-db-btn"')}
+      ${iconButton('logout', 'Sign out', 'id="sign-out-btn"')}
     </div>
-    <button class="user-signout" id="switch-db-btn" type="button" title="Switch database" aria-label="Switch database"><span class="signout-label">Switch database</span><span class="signout-icon" aria-hidden="true">⇄</span></button>
-    <button class="user-signout" id="sign-out-btn" type="button" title="Sign out" aria-label="Sign out"><span class="signout-label">Sign out</span><span class="signout-icon" aria-hidden="true">⎋</span></button>
   `;
   box.querySelector('#sign-out-btn').addEventListener('click', async () => {
     await window.api.auth.signOut();

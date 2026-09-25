@@ -23,8 +23,8 @@ async function renderList(container) {
     const rows = sortedRows(invoices, sortState);
     container.innerHTML = `
       <div class="page-header">
-        <h1>Outgoing Invoices</h1>
-        <button class="btn primary" id="new-invoice">+ New Invoice</button>
+        ${window.Helpers.pageTitle('Outgoing invoices', 'Transactions')}
+        <button class="btn primary" id="new-invoice">${window.Helpers.icon('add')}New invoice</button>
       </div>
       <section class="card">
         ${invoices.length === 0
@@ -42,16 +42,16 @@ async function renderList(container) {
                 ${rows
                   .map((inv) => `
                     <tr>
-                      <td>${escapeHtml(inv.invoice_number)}</td>
+                      <td class="mono">${escapeHtml(inv.invoice_number)}</td>
                       <td>${escapeHtml(inv.customer_name || '—')}</td>
                       <td>${formatDate(inv.invoice_date)}</td>
                       <td><span class="badge status-${escapeHtml(inv.status)}">${escapeHtml(inv.status)}</span></td>
                       <td class="num">${formatMoney(inv.total)}</td>
                       <td class="actions"><div class="actions-row">
-                        ${inv.attachment_path ? `<button class="btn small" data-view-attachment="${inv.id}">📎 View</button>` : ''}
-                        <button class="btn small" data-edit="${inv.id}">Edit</button>
-                        <button class="btn small" data-pdf="${inv.id}">PDF</button>
-                        <button class="btn small danger" data-delete="${inv.id}">Delete</button>
+                        ${inv.attachment_path ? `${window.Helpers.iconButton('attach_file', 'View attachment', `data-view-attachment="${inv.id}"`)}` : ''}
+                        ${window.Helpers.iconButton('edit', 'Edit', `data-edit="${inv.id}"`)}
+                        ${window.Helpers.iconButton('picture_as_pdf', 'Export PDF', `data-pdf="${inv.id}"`)}
+                        ${window.Helpers.iconButton('delete', 'Delete', `data-delete="${inv.id}"`, 'danger')}
                       </div></td>
                     </tr>
                   `)
@@ -138,11 +138,11 @@ async function renderForm(container, invoiceId) {
 
   container.innerHTML = `
     <div class="page-header">
-      <h1>${isEdit ? `Edit Invoice ${escapeHtml(invoice.invoice_number)}` : 'New Outgoing Invoice'}</h1>
+      ${window.Helpers.pageTitle(isEdit ? `Invoice ${escapeHtml(invoice.invoice_number)}` : 'New outgoing invoice', 'Outgoing invoices')}
       ${isEdit ? `
         <div class="invoice-nav">
-          <button type="button" class="btn small" id="prev-invoice" ${prevInvoice ? '' : 'disabled'}>◀ Previous</button>
-          <button type="button" class="btn small" id="next-invoice" ${nextInvoice ? '' : 'disabled'}>Next ▶</button>
+          <button type="button" class="btn small" id="prev-invoice" ${prevInvoice ? '' : 'disabled'}>${window.Helpers.icon('chevron_left')}Previous</button>
+          <button type="button" class="btn small" id="next-invoice" ${nextInvoice ? '' : 'disabled'}>Next${window.Helpers.icon('chevron_right')}</button>
         </div>
       ` : ''}
     </div>
@@ -215,7 +215,7 @@ async function renderForm(container, invoiceId) {
     const row = qs('#attachment-row', container);
     if (pendingAttachmentName) {
       row.innerHTML = `
-        <span class="attachment-name">📎 ${escapeHtml(pendingAttachmentName)} <span class="muted small">(new)</span></span>
+        <span class="attachment-name">${window.Helpers.icon('attach_file')} ${escapeHtml(pendingAttachmentName)} <span class="muted small">(new)</span></span>
         <button type="button" class="btn small" id="choose-attachment">Replace…</button>
         <button type="button" class="btn small" id="clear-pending-attachment">Cancel</button>
       `;
@@ -226,7 +226,7 @@ async function renderForm(container, invoiceId) {
       `;
     } else if (invoice?.attachment_name) {
       row.innerHTML = `
-        <span class="attachment-name">📎 ${escapeHtml(invoice.attachment_name)}</span>
+        <span class="attachment-name">${window.Helpers.icon('attach_file')} ${escapeHtml(invoice.attachment_name)}</span>
         <button type="button" class="btn small" id="view-attachment">View</button>
         <button type="button" class="btn small" id="choose-attachment">Replace…</button>
         <button type="button" class="btn small danger" id="remove-attachment">Remove</button>

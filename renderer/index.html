@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file:" />
   <title>BookBin</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,9 +13,13 @@
   <div id="shell">
     <aside id="sidebar">
       <div class="sidebar-header">
-        <div class="brand"><span class="brand-icon">📒</span><span class="brand-text">BookBin</span></div>
-        <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Collapse sidebar" aria-label="Collapse sidebar">
-          <span class="chevron">‹</span>
+        <div class="brand">
+          <span class="logo-mark"><span class="icon">auto_stories</span></span>
+          <span class="brand-text">BookBin</span>
+        </div>
+        <button class="icon-btn" type="button" data-theme-toggle><span class="icon">dark_mode</span></button>
+        <button id="sidebar-toggle" class="icon-btn sidebar-toggle" type="button" title="Collapse sidebar" aria-label="Collapse sidebar">
+          <span class="icon">chevron_left</span>
         </button>
       </div>
       <nav id="nav"></nav>
