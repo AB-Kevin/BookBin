@@ -6,19 +6,22 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "release": "electron-builder --win --publish always",
-    "release:mac": "electron-builder --mac --publish always"
+    "dist": "node scripts/write-supabase-config.js && electron-builder --win",
+    "dist:mac": "node scripts/write-supabase-config.js && electron-builder --mac",
+    "release": "node scripts/write-supabase-config.js && electron-builder --win --publish always",
+    "release:mac": "node scripts/write-supabase-config.js && electron-builder --mac --publish always",
+    "config": "node scripts/write-supabase-config.js",
+    "export": "node scripts/export-to-supabase.js"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "@supabase/supabase-js": "^2.117.1",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
     "electron": "^44.3.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "better-sqlite3": "^13.0.3"
   },
   "build": {
     "appId": "com.bookbin.app",
@@ -26,8 +29,7 @@
     "files": [
       "main.js",
       "preload.js",
-      "workspace.js",
-      "lock.js",
+      "config/**/*",
       "db/**/*",
       "ipc/**/*",
       "renderer/**/*",

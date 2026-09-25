@@ -437,29 +437,9 @@ option.new-entry { color: var(--primary); font-style: italic; }
   justify-content: center;
   gap: 12px;
 }
-.banner-readonly { background: #fef3c7; color: #92400e; }
 .banner-autoclose { background: #fee2e2; color: #991b1b; }
-.banner-request { background: #dbeafe; color: #1e40af; }
-.banner-granted { background: #dcfce7; color: #15803d; }
 .banner .btn { flex-shrink: 0; }
 
-/* Read-only mode: everything inside the main content area and any open
-   modal becomes inert. th.sortable and the sidebar/banner (which live
-   outside #content and .modal) are deliberately untouched, so browsing,
-   sorting, and navigating still work — only actions that would write to the
-   shared database are blocked. */
-body.read-only-mode #content button,
-body.read-only-mode #content input,
-body.read-only-mode #content select,
-body.read-only-mode #content textarea,
-body.read-only-mode .modal button,
-body.read-only-mode .modal input,
-body.read-only-mode .modal select,
-body.read-only-mode .modal textarea {
-  pointer-events: none;
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 .ext-link { color: var(--primary); text-decoration: underline; cursor: pointer; }
 
 .cost-snapshot { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
@@ -549,3 +529,164 @@ body.read-only-mode .modal textarea {
   font-size: 14px;
 }
 .error { color: var(--danger); }
+
+/* ---------------------------------------------------------------- sign-in */
+
+/* The gate. #login-root is empty and hidden whenever a session exists, so the
+   app never paints behind the login form. */
+#login-root { display: none; }
+
+body.signed-out #login-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  background: var(--bg);
+}
+
+body.signed-out #shell,
+body.signed-out #banner-root { display: none; }
+
+.login-card {
+  width: 320px;
+  padding: 28px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.login-icon { font-size: 22px; }
+.login-title { font-size: 20px; font-weight: 650; }
+
+.login-sub {
+  margin: 6px 0 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.login-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.login-input {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.login-input:disabled { background: var(--bg); color: var(--muted); }
+
+/* Reserves its line whether or not there is a message, so the button does not
+   jump down the card the first time a password is wrong. */
+.login-error {
+  min-height: 18px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+.login-submit {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.login-submit:hover:not(:disabled) { background: var(--primary-dark); }
+.login-submit:disabled { opacity: 0.6; cursor: default; }
+
+/* ------------------------------------------------- signed-in user, sidebar */
+
+#sidebar-user {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.user-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 12px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.user-signout {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--sidebar-text);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.user-signout:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+
+/* Collapsed sidebar has room for neither the name nor the word "Sign out",
+   so the label gives way to a glyph rather than being clipped. */
+.signout-icon { display: none; }
+
+#sidebar.collapsed #sidebar-user { padding: 8px 6px; }
+#sidebar.collapsed .user-row { display: none; }
+#sidebar.collapsed .signout-label { display: none; }
+#sidebar.collapsed .signout-icon { display: inline; font-size: 14px; }
+#sidebar.collapsed .user-signout { padding: 4px 0; }
+
+/* Inline error inside a modal form (used by the New User dialog). Reserves no
+   height when empty, so it does not push the buttons around until it has
+   something to say. */
+.form-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+.form-error:empty { display: none; }

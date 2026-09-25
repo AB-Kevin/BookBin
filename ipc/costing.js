@@ -7,59 +7,100 @@
 // on-demand action (not automatic) and writes a permanent snapshot row so
 // the exact contributing invoice lines and shares are still visible later,
 // even if those invoices are subsequently edited or deleted.
-module.exports = function registerCosting(ipcMain, db) {
-  const linesForItemStmt = db.prepare(`
-    SELECT l.invoice_id, l.quantity, l.unit_cost,
-           ii.invoice_number, ii.invoice_date, ii.shipping_tax,
-           v.name AS vendor_name
-    FROM incoming_invoice_lines l
-    JOIN incoming_invoices ii ON ii.id = l.invoice_id
-    LEFT JOIN vendors v ON v.id = ii.vendor_id
-    WHERE l.item_id = ?
-    ORDER BY ii.invoice_date, ii.id
-  `);
-  const getItemStmt = db.prepare('SELECT * FROM items WHERE id = ?');
-  const updateItemCostStmt = db.prepare(
-    'UPDATE items SET default_cost = @default_cost, default_price = @default_price WHERE id = @id'
-  );
-  const getSettingsStmt = db.prepare('SELECT * FROM settings WHERE id = 1');
-  const insertSnapshotStmt = db.prepare(`
-    INSERT INTO item_cost_snapshots (item_id, cost, price, markup_percent, breakdown)
-    VALUES (@item_id, @cost, @price, @markup_percent, @breakdown)
-  `);
-  const getSnapshotStmt = db.prepare('SELECT * FROM item_cost_snapshots WHERE id = ?');
-  const historyStmt = db.prepare(
-    'SELECT * FROM item_cost_snapshots WHERE item_id = ? ORDER BY created_at DESC, id DESC'
-  );
-  const itemIdsWithPurchasesStmt = db.prepare(
-    'SELECT DISTINCT item_id FROM incoming_invoice_lines WHERE item_id IS NOT NULL'
-  );
+//
+// Ported to Supabase with the arithmetic untouched. Only the reads and the
+// final write changed: rows arrive over REST, get aggregated here exactly as
+// the SQL GROUP BY used to, and the snapshot plus the item's new cost are
+// written together by record_item_cost().
+//
+// The read and the write are no longer one transaction, which the SQLite
+// version got for free. In practice that does not matter: recalculating is a
+// deliberate button press, and a snapshot records the precise lines it was
+// computed from, so a recalculation that raced an invoice edit is visibly
+// explained by its own breakdown rather than being silently wrong.
 
-  function invoiceStatsFor(invoiceIds) {
-    const placeholders = invoiceIds.map(() => '?').join(',');
-    const rows = db.prepare(`
-      SELECT invoice_id, SUM(quantity * unit_cost) AS subtotal, COUNT(*) AS line_count
-      FROM incoming_invoice_lines
-      WHERE invoice_id IN (${placeholders})
-      GROUP BY invoice_id
-    `).all(...invoiceIds);
-    return new Map(rows.map((r) => [r.invoice_id, r]));
+const { getSupabase } = require('../db/supabase');
+const { table, unwrap, toNumber, numericColumns } = require('../db/rest');
+
+const SNAPSHOT_COLUMNS = 'id, item_id, cost, price, markup_percent, breakdown, created_at';
+
+const coerceSnapshot = numericColumns('cost', 'price', 'markup_percent');
+const coerceItem = numericColumns('quantity_on_hand', 'default_cost', 'default_price');
+
+// breakdown is a jsonb column, so it arrives already parsed. The string branch
+// is for rows written by the SQLite version, where it was TEXT.
+function withParsedBreakdown(row) {
+  if (!row) return row;
+  const snapshot = coerceSnapshot(row);
+  if (typeof snapshot.breakdown === 'string') {
+    try {
+      snapshot.breakdown = JSON.parse(snapshot.breakdown);
+    } catch (err) {
+      snapshot.breakdown = null;
+    }
+  }
+  return snapshot;
+}
+
+module.exports = function registerCosting(ipcMain) {
+  async function linesForItem(itemId) {
+    const rows = unwrap(
+      await table('incoming_invoice_lines')
+        .select('invoice_id, quantity, unit_cost, incoming_invoices(invoice_number, invoice_date, shipping_tax, vendors(name))')
+        .eq('item_id', itemId)
+    );
+    return rows
+      .map((row) => {
+        const invoice = row.incoming_invoices || {};
+        return {
+          invoice_id: row.invoice_id,
+          quantity: toNumber(row.quantity) || 0,
+          unit_cost: toNumber(row.unit_cost) || 0,
+          invoice_number: invoice.invoice_number || null,
+          invoice_date: invoice.invoice_date || null,
+          shipping_tax: toNumber(invoice.shipping_tax) || 0,
+          vendor_name: (invoice.vendors && invoice.vendors.name) || null,
+        };
+      })
+      // Matches the old ORDER BY ii.invoice_date, ii.id.
+      .sort((a, b) =>
+        String(a.invoice_date).localeCompare(String(b.invoice_date)) || a.invoice_id - b.invoice_id
+      );
+  }
+
+  // Replaces the old GROUP BY: PostgREST cannot aggregate, so the invoice's
+  // lines are fetched and totalled here instead.
+  async function invoiceStatsFor(invoiceIds) {
+    if (!invoiceIds.length) return new Map();
+    const rows = unwrap(
+      await table('incoming_invoice_lines')
+        .select('invoice_id, quantity, unit_cost')
+        .in('invoice_id', invoiceIds)
+    );
+    const stats = new Map();
+    for (const row of rows) {
+      const entry = stats.get(row.invoice_id) || { invoice_id: row.invoice_id, subtotal: 0, line_count: 0 };
+      entry.subtotal += (toNumber(row.quantity) || 0) * (toNumber(row.unit_cost) || 0);
+      entry.line_count += 1;
+      stats.set(row.invoice_id, entry);
+    }
+    return stats;
   }
 
   // Returns null when the item has never appeared on an incoming invoice —
   // there's nothing to cost it from.
-  function computeItemBreakdown(itemId) {
-    const lines = linesForItemStmt.all(itemId);
+  async function computeItemBreakdown(itemId) {
+    const lines = await linesForItem(itemId);
     if (lines.length === 0) return null;
 
     const invoiceIds = [...new Set(lines.map((l) => l.invoice_id))];
-    const statsByInvoice = invoiceStatsFor(invoiceIds);
+    const statsByInvoice = await invoiceStatsFor(invoiceIds);
 
     let totalCostWithShipping = 0;
     let totalQuantity = 0;
     const contributions = lines.map((line) => {
       const rawTotal = line.quantity * line.unit_cost;
-      const stats = statsByInvoice.get(line.invoice_id);
+      const stats = statsByInvoice.get(line.invoice_id) || { subtotal: 0, line_count: 0 };
       const shippingTax = line.shipping_tax || 0;
       // If every line on the invoice is $0 (a free/promo invoice), fall back
       // to splitting the shipping/tax evenly across its lines instead of
@@ -93,41 +134,64 @@ module.exports = function registerCosting(ipcMain, db) {
     return { totalQuantity, totalCostWithShipping, cost, contributions };
   }
 
-  const recalculateItemTx = db.transaction((itemId) => {
-    const breakdown = computeItemBreakdown(itemId);
+  async function recalculateItem(itemId) {
+    const breakdown = await computeItemBreakdown(itemId);
     if (!breakdown) return { ok: false, reason: 'no-history' };
 
-    const markupPercent = getSettingsStmt.get().cost_markup_percent;
+    const settings = unwrap(
+      await table('settings').select('cost_markup_percent').eq('id', 1).single()
+    );
+    const markupPercent = toNumber(settings.cost_markup_percent) || 0;
     const cost = breakdown.cost;
     const price = Math.round(cost * (1 + markupPercent / 100) * 100) / 100;
 
-    const info = insertSnapshotStmt.run({
-      item_id: itemId,
-      cost,
-      price,
-      markup_percent: markupPercent,
-      breakdown: JSON.stringify({
+    const { data, error } = await getSupabase().rpc('record_item_cost', {
+      p_item_id: itemId,
+      p_cost: cost,
+      p_price: price,
+      p_markup_percent: markupPercent,
+      p_breakdown: {
         totalQuantity: breakdown.totalQuantity,
         totalCostWithShipping: breakdown.totalCostWithShipping,
         contributions: breakdown.contributions,
-      }),
+      },
     });
-    updateItemCostStmt.run({ id: itemId, default_cost: cost, default_price: price });
+    const result = unwrap({ data, error });
 
-    return { ok: true, snapshot: withParsedBreakdown(getSnapshotStmt.get(info.lastInsertRowid)), item: getItemStmt.get(itemId) };
-  });
-
-  function withParsedBreakdown(row) {
-    if (!row) return row;
-    return { ...row, breakdown: JSON.parse(row.breakdown) };
+    return {
+      ok: true,
+      snapshot: withParsedBreakdown(result.snapshot),
+      item: coerceItem(result.item),
+    };
   }
 
-  ipcMain.handle('costing:recalculateItem', (_e, itemId) => recalculateItemTx(itemId));
+  ipcMain.handle('costing:recalculateItem', (_e, itemId) => recalculateItem(itemId));
 
-  ipcMain.handle('costing:recalculateAll', () => {
-    const itemIds = itemIdsWithPurchasesStmt.all().map((r) => r.item_id);
-    return itemIds.map((itemId) => ({ itemId, ...recalculateItemTx(itemId) }));
+  ipcMain.handle('costing:recalculateAll', async () => {
+    // Replaces SELECT DISTINCT, which PostgREST has no equivalent for.
+    const rows = unwrap(
+      await table('incoming_invoice_lines').select('item_id').not('item_id', 'is', null)
+    );
+    const itemIds = [...new Set(rows.map((r) => r.item_id))];
+
+    // Sequential on purpose: each call writes an item and a snapshot, and
+    // firing all of them at once would have every recalculation competing for
+    // connections to no benefit on a list this size.
+    const results = [];
+    for (const itemId of itemIds) {
+      results.push({ itemId, ...(await recalculateItem(itemId)) });
+    }
+    return results;
   });
 
-  ipcMain.handle('costing:history', (_e, itemId) => historyStmt.all(itemId).map(withParsedBreakdown));
+  ipcMain.handle('costing:history', async (_e, itemId) => {
+    const rows = unwrap(
+      await table('item_cost_snapshots')
+        .select(SNAPSHOT_COLUMNS)
+        .eq('item_id', itemId)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+    );
+    return rows.map(withParsedBreakdown);
+  });
 };

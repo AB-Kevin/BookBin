@@ -4,11 +4,9 @@ window.Screens.settings = async function renderSettings(container) {
   const { escapeHtml, qs, confirmAction } = window.Helpers;
 
   let settings;
-  let workspaceDir;
 
   async function load() {
     settings = await window.api.settings.get();
-    workspaceDir = await window.api.workspace.get();
     render();
   }
 
@@ -31,18 +29,6 @@ window.Screens.settings = async function renderSettings(container) {
               ? '<button type="button" class="btn small danger" id="remove-logo-btn">Remove</button>'
               : ''}
           </div>
-        </div>
-
-        <h2>Shared Workspace</h2>
-        <p class="muted small">
-          BookBin's data (database and logo) is stored in this folder. Point it at a folder synced by
-          OneDrive (or similar) to share this data with another device running BookBin.
-        </p>
-        <div class="form-row">
-          <label>Workspace folder<input value="${escapeHtml(workspaceDir)}" disabled /></label>
-        </div>
-        <div class="modal-actions" style="justify-content: flex-start; margin-top: 8px;">
-          <button type="button" class="btn small" id="choose-workspace-btn">Choose Folder…</button>
         </div>
 
         <h2>Invoice Numbering</h2>
@@ -100,18 +86,6 @@ window.Screens.settings = async function renderSettings(container) {
       });
     }
 
-    qs('#choose-workspace-btn', container).addEventListener('click', async () => {
-      const proceed = await confirmAction(
-        'Choosing a new workspace folder will restart BookBin. If the folder is empty, your current ' +
-        'data will be copied there so it can be shared (e.g. via OneDrive); if it already contains ' +
-        "BookBin data, that data will be used instead. Continue?"
-      );
-      if (!proceed) return;
-      const result = await window.api.workspace.choose();
-      // A successful choice relaunches the app, so there's nothing left to
-      // update here; only a cancel returns control to this screen.
-      if (result && result.canceled) return;
-    });
   }
 
   await load();

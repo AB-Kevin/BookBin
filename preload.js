@@ -14,6 +14,17 @@ function makeCrud(domain) {
 }
 
 contextBridge.exposeInMainWorld('api', {
+  auth: {
+    signIn: (email, password) => ipcRenderer.invoke('auth:signIn', email, password),
+    signOut: () => ipcRenderer.invoke('auth:signOut'),
+    getSession: () => ipcRenderer.invoke('auth:getSession'),
+    getProfile: () => ipcRenderer.invoke('auth:getProfile'),
+    onChanged: (callback) => {
+      const listener = (_event, profile) => callback(profile);
+      ipcRenderer.on('auth:changed', listener);
+      return () => ipcRenderer.removeListener('auth:changed', listener);
+    },
+  },
   items: {
     ...makeCrud('items'),
     history: (id) => ipcRenderer.invoke('items:history', id),
@@ -39,9 +50,11 @@ contextBridge.exposeInMainWorld('api', {
     chooseLogo: () => ipcRenderer.invoke('settings:chooseLogo'),
     removeLogo: () => ipcRenderer.invoke('settings:removeLogo'),
   },
-  workspace: {
-    get: () => ipcRenderer.invoke('workspace:get'),
-    choose: () => ipcRenderer.invoke('workspace:choose'),
+  users: {
+    list: () => ipcRenderer.invoke('users:list'),
+    create: (data) => ipcRenderer.invoke('users:create', data),
+    delete: (userId) => ipcRenderer.invoke('users:delete', userId),
+    setRole: (userId, role) => ipcRenderer.invoke('users:setRole', userId, role),
   },
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
@@ -66,26 +79,6 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('purchaseOrderItems:update', id, data),
     delete: (id) => ipcRenderer.invoke('purchaseOrderItems:delete', id),
     invoices: (id) => ipcRenderer.invoke('purchaseOrderItems:invoices', id),
-  },
-  lock: {
-    getStatus: () => ipcRenderer.invoke('lock:getStatus'),
-    requestAccess: () => ipcRenderer.invoke('lock:requestAccess'),
-    respondToRequest: (action) => ipcRenderer.invoke('lock:respondToRequest', action),
-    onStatus: (callback) => {
-      const listener = (_event, status) => callback(status);
-      ipcRenderer.on('lock:status', listener);
-      return () => ipcRenderer.removeListener('lock:status', listener);
-    },
-    onIncomingRequest: (callback) => {
-      const listener = (_event, payload) => callback(payload);
-      ipcRenderer.on('lock:incomingRequest', listener);
-      return () => ipcRenderer.removeListener('lock:incomingRequest', listener);
-    },
-    onRequestResult: (callback) => {
-      const listener = (_event, payload) => callback(payload);
-      ipcRenderer.on('lock:requestResult', listener);
-      return () => ipcRenderer.removeListener('lock:requestResult', listener);
-    },
   },
   activity: {
     notify: () => ipcRenderer.send('activity:ping'),

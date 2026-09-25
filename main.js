@@ -1,60 +1,29 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const { initDatabase, backupDatabase, closeDatabase } = require('./db');
-const { getWorkspaceDir, ensureWorkspaceDirs } = require('./workspace');
 
 const registerItems = require('./ipc/items');
-const registerVendors = require('./ipc/vendors');
-const registerCustomers = require('./ipc/customers');
+const { registerVendors, registerCustomers } = require('./ipc/contacts');
 const registerIncomingInvoices = require('./ipc/incomingInvoices');
 const registerOutgoingInvoices = require('./ipc/outgoingInvoices');
 const registerSettings = require('./ipc/settings');
 const registerDashboard = require('./ipc/dashboard');
 const registerUpdates = require('./ipc/updates');
-const registerWorkspace = require('./ipc/workspace');
 const registerShell = require('./ipc/shell');
 const registerCosting = require('./ipc/costing');
-const registerPurchaseOrders = require('./ipc/purchaseOrders');
-const registerPurchaseOrderItems = require('./ipc/purchaseOrderItems');
-const registerLock = require('./ipc/lock');
+const { registerPurchaseOrders, registerPurchaseOrderItems } = require('./ipc/purchasing');
 const registerActivityMonitor = require('./ipc/activity');
+const registerAuth = require('./ipc/auth');
+const registerUsers = require('./ipc/users');
 
 let mainWindow;
-let db = null;
-let lockController = null;
+let authController = null;
 
-// Channels that never touch the shared database (or are pure reads of it)
-// stay usable even while another device holds the write lock. Every channel
-// not listed here — including any added later — is blocked by default while
-// read-only, via the ipcMain.handle wrapper below; that fails closed rather
-// than open if a new mutating handler is added without updating this list.
-const READONLY_EXEMPT_SUFFIXES = new Set(['list', 'get', 'history']);
-const READONLY_EXEMPT_CHANNELS = new Set([
-  'dashboard:summary',
-  'incomingInvoices:chooseAttachment', 'incomingInvoices:openAttachment',
-  'outgoingInvoices:chooseAttachment', 'outgoingInvoices:openAttachment',
-  'workspace:choose',
-  'shell:openExternal',
-  'updates:check', 'updates:download', 'updates:quitAndInstall', 'updates:openReleasesPage', 'updates:getVersion',
-  'lock:getStatus', 'lock:requestAccess', 'lock:respondToRequest',
-  'purchaseOrderItems:invoices',
-]);
-
-function installReadOnlyGuard() {
-  const originalHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = (channel, listener) => {
-    const suffix = channel.includes(':') ? channel.split(':')[1] : '';
-    if (READONLY_EXEMPT_CHANNELS.has(channel) || READONLY_EXEMPT_SUFFIXES.has(suffix)) {
-      return originalHandle(channel, listener);
-    }
-    return originalHandle(channel, (event, ...args) => {
-      if (lockController && lockController.isReadOnly()) {
-        throw new Error('This database is currently open elsewhere and is read-only.');
-      }
-      return listener(event, ...args);
-    });
-  };
-}
+// BookBin keeps nothing on disk any more. The database is in Postgres, the
+// attachments and logo are in Supabase Storage, and the shared folder that
+// used to hold all of it -- along with the single-writer lock that guarded it,
+// the read-only mode that enforced that lock, and the backups that protected
+// the file -- is gone. The only local state left is a cached session and
+// downloaded copies of files, both in userData, both disposable.
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -75,46 +44,28 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  const workspaceDir = getWorkspaceDir();
-  ensureWorkspaceDirs(workspaceDir);
-  db = initDatabase(workspaceDir);
-
-  installReadOnlyGuard();
-
-  registerItems(ipcMain, db);
-  registerVendors(ipcMain, db);
-  registerCustomers(ipcMain, db);
-  registerIncomingInvoices(ipcMain, db, workspaceDir);
-  registerOutgoingInvoices(ipcMain, db, workspaceDir);
-  registerSettings(ipcMain, db, workspaceDir);
-  registerDashboard(ipcMain, db);
+  registerItems(ipcMain);
+  registerVendors(ipcMain);
+  registerCustomers(ipcMain);
+  registerIncomingInvoices(ipcMain);
+  registerOutgoingInvoices(ipcMain);
+  registerSettings(ipcMain);
+  registerDashboard(ipcMain);
   registerUpdates(ipcMain, () => mainWindow);
-  registerWorkspace(ipcMain, db, workspaceDir);
   registerShell(ipcMain);
-  registerCosting(ipcMain, db);
-  registerPurchaseOrders(ipcMain, db);
-  registerPurchaseOrderItems(ipcMain, db);
+  registerCosting(ipcMain);
+  registerPurchaseOrders(ipcMain);
+  registerPurchaseOrderItems(ipcMain);
 
-  lockController = registerLock(ipcMain, workspaceDir, () => mainWindow);
+  authController = registerAuth(ipcMain, () => mainWindow);
+  registerUsers(ipcMain, () => authController.getProfile());
   registerActivityMonitor(ipcMain, () => mainWindow, () => app.quit());
-
-  // Only the write-lock holder snapshots; see backupDatabase. registerLock
-  // resolves the lock synchronously, so this reflects the real state.
-  if (!lockController.isReadOnly()) backupDatabase(db, workspaceDir);
 
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
-
-// Release the lock first, then checkpoint and close — a device waiting on the
-// lock should see it freed without waiting on the checkpoint, and the
-// checkpoint doesn't need the lock since we're the only writer either way.
-app.on('before-quit', () => {
-  if (lockController) lockController.releaseIfHeld();
-  closeDatabase(db);
 });
 
 app.on('window-all-closed', () => {
