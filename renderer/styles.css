@@ -679,3 +679,14 @@ body.signed-out #banner-root { display: none; }
 #sidebar.collapsed .signout-label { display: none; }
 #sidebar.collapsed .signout-icon { display: inline; font-size: 14px; }
 #sidebar.collapsed .user-signout { padding: 4px 0; }
+
+/* Inline error inside a modal form (used by the New User dialog). Reserves no
+   height when empty, so it does not push the buttons around until it has
+   something to say. */
+.form-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+.form-error:empty { display: none; }

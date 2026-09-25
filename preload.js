@@ -50,6 +50,12 @@ contextBridge.exposeInMainWorld('api', {
     chooseLogo: () => ipcRenderer.invoke('settings:chooseLogo'),
     removeLogo: () => ipcRenderer.invoke('settings:removeLogo'),
   },
+  users: {
+    list: () => ipcRenderer.invoke('users:list'),
+    create: (data) => ipcRenderer.invoke('users:create', data),
+    delete: (userId) => ipcRenderer.invoke('users:delete', userId),
+    setRole: (userId, role) => ipcRenderer.invoke('users:setRole', userId, role),
+  },
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
   },

@@ -13,6 +13,7 @@ const registerCosting = require('./ipc/costing');
 const { registerPurchaseOrders, registerPurchaseOrderItems } = require('./ipc/purchasing');
 const registerActivityMonitor = require('./ipc/activity');
 const registerAuth = require('./ipc/auth');
+const registerUsers = require('./ipc/users');
 
 let mainWindow;
 let authController = null;
@@ -57,6 +58,7 @@ app.whenReady().then(() => {
   registerPurchaseOrderItems(ipcMain);
 
   authController = registerAuth(ipcMain, () => mainWindow);
+  registerUsers(ipcMain, () => authController.getProfile());
   registerActivityMonitor(ipcMain, () => mainWindow, () => app.quit());
 
   createWindow();

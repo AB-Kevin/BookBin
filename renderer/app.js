@@ -13,13 +13,17 @@ const NAV_ITEMS = [
   { path: 'outgoing-invoices', label: 'Outgoing Invoices', icon: '📤' },
   { path: 'purchase-orders', label: 'Purchase Orders', icon: '📝' },
   { path: 'settings', label: 'Settings', icon: '⚙️' },
+  // Hidden from managers. That is presentation only -- the database and the
+  // Edge Function are what actually refuse them.
+  { path: 'users', label: 'Users', icon: '👤', ownerOnly: true },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = 'bookbin.sidebarCollapsed';
 
 function buildNav() {
   const nav = document.getElementById('nav');
-  nav.innerHTML = NAV_ITEMS.map(
+  const isOwner = !!currentProfile && currentProfile.role === 'owner';
+  nav.innerHTML = NAV_ITEMS.filter((item) => !item.ownerOnly || isOwner).map(
     (item) => `<a class="nav-link" href="#/${item.path}" data-section="${item.path}" title="${item.label}">
       <span class="nav-icon">${item.icon}</span><span class="nav-label">${item.label}</span>
     </a>`
@@ -82,6 +86,7 @@ function screenFor(section) {
     'outgoing-invoices': window.Screens.outgoingInvoices,
     'purchase-orders': window.Screens.purchaseOrders,
     settings: window.Screens.settings,
+    users: window.Screens.users,
   };
   return map[section] || window.Screens.dashboard;
 }
@@ -308,7 +313,6 @@ function renderUserWidget() {
 function startApp() {
   if (appStarted) return;
   appStarted = true;
-  buildNav();
   initSidebarToggle();
   initUpdateWidget();
   initActivityBanner();
@@ -317,8 +321,10 @@ function startApp() {
 function applyProfile(profile) {
   currentProfile = profile || null;
   document.body.classList.toggle('signed-out', !currentProfile);
+  window.CurrentProfile = currentProfile;
   if (currentProfile) {
     startApp();
+    buildNav();
     renderUserWidget();
     render();
   } else {
