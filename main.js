@@ -13,8 +13,7 @@ const registerUpdates = require('./ipc/updates');
 const registerWorkspace = require('./ipc/workspace');
 const registerShell = require('./ipc/shell');
 const registerCosting = require('./ipc/costing');
-const registerPurchaseOrders = require('./ipc/purchaseOrders');
-const registerPurchaseOrderItems = require('./ipc/purchaseOrderItems');
+const { registerPurchaseOrders, registerPurchaseOrderItems } = require('./ipc/purchasing');
 const registerLock = require('./ipc/lock');
 const registerActivityMonitor = require('./ipc/activity');
 const registerAuth = require('./ipc/auth');
@@ -39,7 +38,7 @@ const READONLY_EXEMPT_SUFFIXES = new Set(['list', 'get', 'history']);
 // domain has moved.
 const PORTED_DOMAINS = new Set([
   'vendors', 'customers', 'items', 'incomingInvoices', 'costing',
-  'outgoingInvoices',
+  'outgoingInvoices', 'purchaseOrders', 'purchaseOrderItems',
 ]);
 const READONLY_EXEMPT_CHANNELS = new Set([
   'dashboard:summary',
@@ -107,8 +106,8 @@ app.whenReady().then(() => {
   registerWorkspace(ipcMain, db, workspaceDir);
   registerShell(ipcMain);
   registerCosting(ipcMain);
-  registerPurchaseOrders(ipcMain, db);
-  registerPurchaseOrderItems(ipcMain, db);
+  registerPurchaseOrders(ipcMain);
+  registerPurchaseOrderItems(ipcMain);
 
   authController = registerAuth(ipcMain, () => mainWindow);
 
