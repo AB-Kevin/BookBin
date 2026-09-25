@@ -20,6 +20,13 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const ROLES = ['owner', 'manager'];
 
+// Printed once per cold start. A deployment that is not this code -- the
+// dashboard's default template, say -- prints nothing, which is exactly the
+// difference between "my function refused the request" and "my function was
+// never there". Bump it when changing this file.
+const VERSION = 'manage-users v1';
+console.log(`${VERSION} booted`);
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -43,8 +50,14 @@ Deno.serve(async (req) => {
   if (!user?.user) return json(401, { error: 'Not signed in.' });
 
   const { data: isOwner, error: roleError } = await caller.rpc('is_owner');
-  if (roleError) return json(500, { error: 'Could not check your permissions.' });
-  if (!isOwner) return json(403, { error: 'Only an owner can manage accounts.' });
+  if (roleError) {
+    console.error('is_owner failed:', roleError.message);
+    return json(500, { error: 'Could not check your permissions.' });
+  }
+  if (!isOwner) {
+    console.warn(`refused: ${user.user.id} is not an owner`);
+    return json(403, { error: 'Only an owner can manage accounts.' });
+  }
 
   let body: Record<string, string>;
   try {
@@ -52,6 +65,10 @@ Deno.serve(async (req) => {
   } catch {
     return json(400, { error: 'Malformed request.' });
   }
+
+  // Logged by id, not email: these lines are for working out what happened,
+  // not for keeping a copy of who was hired.
+  console.log(`${VERSION}: action=${body.action} by=${user.user.id}`);
 
   // Only from here on, having established the caller is an owner.
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -86,6 +103,7 @@ Deno.serve(async (req) => {
     });
 
     if (error) {
+      console.error('createUser failed:', error.message);
       const message = /already been registered|already exists/i.test(error.message)
         ? 'An account with that email already exists.'
         : error.message;
@@ -104,11 +122,13 @@ Deno.serve(async (req) => {
       .upsert({ id, email, full_name: fullName || null, role }, { onConflict: 'id' });
 
     if (profileError) {
+      console.error('profile upsert failed, rolling back:', profileError.message);
       // Leaving an auth user with no profile would be worse than no account.
       await admin.auth.admin.deleteUser(id);
       return json(500, { error: `The account could not be set up: ${profileError.message}` });
     }
 
+    console.log(`created ${id} as ${role}`);
     return json(200, { ok: true, id, email, role });
   }
 
