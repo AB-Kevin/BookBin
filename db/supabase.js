@@ -14,7 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app, safeStorage } = require('electron');
+const { app, net, safeStorage } = require('electron');
 const { createClient } = require('@supabase/supabase-js');
 const { getSupabaseConfig } = require('../config/supabase');
 
@@ -96,6 +96,12 @@ function getSupabase() {
   }
 
   client = createClient(url, publishableKey, {
+    // Node's own fetch carries its own certificate list and ignores the
+    // Windows proxy settings, so an antivirus that inspects HTTPS -- trusted by
+    // every browser on the machine -- makes each request fail as "fetch
+    // failed". Electron's net.fetch goes through Chromium's network stack and
+    // sees certificates, proxy and DNS exactly as the browser does.
+    global: { fetch: (...args) => net.fetch(...args) },
     auth: {
       storage: createSecureStorage(sessionPath),
       persistSession: true,
