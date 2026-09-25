@@ -6,10 +6,11 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "release": "electron-builder --win --publish always",
-    "release:mac": "electron-builder --mac --publish always"
+    "dist": "node scripts/write-supabase-config.js && electron-builder --win",
+    "dist:mac": "node scripts/write-supabase-config.js && electron-builder --mac",
+    "release": "node scripts/write-supabase-config.js && electron-builder --win --publish always",
+    "release:mac": "node scripts/write-supabase-config.js && electron-builder --mac --publish always",
+    "config": "node scripts/write-supabase-config.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
@@ -28,6 +29,7 @@
       "preload.js",
       "workspace.js",
       "lock.js",
+      "config/**/*",
       "db/**/*",
       "ipc/**/*",
       "renderer/**/*",
