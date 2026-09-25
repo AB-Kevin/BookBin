@@ -20,6 +20,7 @@
 //                 server happens to be configured.
 
 const { getSupabase } = require('./supabase');
+const { describeConnectionFailure } = require('./errors');
 
 /** Throws on error, otherwise returns data. */
 function unwrap(result) {
@@ -40,9 +41,8 @@ function toFriendlyError(error) {
   if (code === '23505') {
     return new Error('A record with those details already exists.');
   }
-  if (/fetch failed|network|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i.test(message)) {
-    return new Error('Cannot reach the server. Check your internet connection.');
-  }
+  const connection = describeConnectionFailure(error);
+  if (connection) return new Error(connection);
   const wrapped = new Error(message);
   wrapped.code = code;
   return wrapped;

@@ -4,10 +4,23 @@ window.Screens.settings = async function renderSettings(container) {
   const { escapeHtml, qs, confirmAction } = window.Helpers;
 
   let settings;
+  let backup;
 
   async function load() {
     settings = await window.api.settings.get();
+    backup = await window.api.backup.status();
     render();
+  }
+
+  // Defined above render() so it is in scope when the template runs.
+  function backupStatusLine() {
+    if (!backup.folder) return 'No backups are being made.';
+    if (!backup.lastRun) return 'No backup has run yet — the first one happens shortly after signing in.';
+    const when = new Date(backup.lastRun).toLocaleString();
+    const result = backup.lastResult;
+    if (result && result.ok) return `Last backup ${when} — ${result.rowCount} rows.`;
+    if (result && !result.ok) return `Last backup failed ${when}: ${result.error}`;
+    return `Last backup ${when}.`;
   }
 
   function render() {
@@ -52,7 +65,105 @@ window.Screens.settings = async function renderSettings(container) {
         </div>
         <p id="save-confirmation" class="muted" hidden>Saved.</p>
       </form>
+
+      <form id="password-form" class="card">
+        <h2>Your Password</h2>
+        <p class="muted small">Changes the password for the account you are signed in as.</p>
+        <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required /></label>
+        <label>New password<input name="newPassword" type="password" autocomplete="new-password" required minlength="8" /></label>
+        <label>Confirm new password<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="8" /></label>
+        <div class="form-error" id="password-error" role="alert"></div>
+        <div class="modal-actions">
+          <button type="submit" class="btn primary" id="password-submit">Change Password</button>
+        </div>
+        <p id="password-confirmation" class="muted" hidden>Password changed.</p>
+      </form>
+
+      <section class="card">
+        <h2>Backups</h2>
+        <p class="muted small">
+          Supabase's free plan keeps no backups of its own. Choosing a folder
+          here saves a copy of everything in the database once a day, keeping
+          the most recent ${backup.keep}. The folder is specific to this
+          computer, so each machine can keep its own copies.
+        </p>
+        <div class="form-row">
+          <label>Backup folder<input value="${backup.folder ? escapeHtml(backup.folder) : 'None — backups are off'}" disabled /></label>
+        </div>
+        <p class="muted small">${backupStatusLine()}</p>
+        <div class="modal-actions" style="justify-content: flex-start;">
+          <button type="button" class="btn small" id="choose-backup-btn">
+            ${backup.folder ? 'Change Folder…' : 'Choose Folder…'}
+          </button>
+          ${backup.folder ? '<button type="button" class="btn small" id="run-backup-btn">Back Up Now</button>' : ''}
+          ${backup.folder ? '<button type="button" class="btn small danger" id="disable-backup-btn">Turn Off</button>' : ''}
+        </div>
+      </section>
     `;
+
+    const chooseBackupBtn = qs('#choose-backup-btn', container);
+    if (chooseBackupBtn) {
+      chooseBackupBtn.addEventListener('click', async () => {
+        backup = await window.api.backup.chooseFolder();
+        render();
+      });
+    }
+
+    const disableBackupBtn = qs('#disable-backup-btn', container);
+    if (disableBackupBtn) {
+      disableBackupBtn.addEventListener('click', async () => {
+        if (!(await confirmAction('Turn off daily backups? Existing backup files are left alone.'))) return;
+        backup = await window.api.backup.disable();
+        render();
+      });
+    }
+
+    const runBackupBtn = qs('#run-backup-btn', container);
+    if (runBackupBtn) {
+      runBackupBtn.addEventListener('click', async () => {
+        runBackupBtn.disabled = true;
+        runBackupBtn.textContent = 'Backing up…';
+        await window.api.backup.runNow();
+        backup = await window.api.backup.status();
+        render();
+      });
+    }
+
+    qs('#password-form', container).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const errorBox = qs('#password-error', container);
+      const submit = qs('#password-submit', container);
+      errorBox.textContent = '';
+
+      const currentPassword = form.get('currentPassword');
+      const newPassword = form.get('newPassword');
+
+      // Checked here as well as in the fields: matching is the one rule the
+      // browser's own validation cannot express.
+      if (newPassword !== form.get('confirmPassword')) {
+        errorBox.textContent = 'The new passwords do not match.';
+        return;
+      }
+
+      submit.disabled = true;
+      submit.textContent = 'Changing…';
+      const result = await window.api.auth.changePassword(currentPassword, newPassword);
+      submit.disabled = false;
+      submit.textContent = 'Change Password';
+
+      if (!result.ok) {
+        errorBox.textContent = result.error;
+        return;
+      }
+
+      // Cleared rather than left filled: the fields hold the password in
+      // plain text, and there is nothing left to do with them.
+      e.target.reset();
+      const confirmation = qs('#password-confirmation', container);
+      confirmation.hidden = false;
+      setTimeout(() => { confirmation.hidden = true; }, 3000);
+    });
 
     qs('#settings-form', container).addEventListener('submit', async (e) => {
       e.preventDefault();

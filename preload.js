@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
     signOut: () => ipcRenderer.invoke('auth:signOut'),
     getSession: () => ipcRenderer.invoke('auth:getSession'),
     getProfile: () => ipcRenderer.invoke('auth:getProfile'),
+    changePassword: (currentPassword, newPassword) =>
+      ipcRenderer.invoke('auth:changePassword', currentPassword, newPassword),
     onChanged: (callback) => {
       const listener = (_event, profile) => callback(profile);
       ipcRenderer.on('auth:changed', listener);
@@ -49,6 +51,12 @@ contextBridge.exposeInMainWorld('api', {
     update: (data) => ipcRenderer.invoke('settings:update', data),
     chooseLogo: () => ipcRenderer.invoke('settings:chooseLogo'),
     removeLogo: () => ipcRenderer.invoke('settings:removeLogo'),
+  },
+  backup: {
+    status: () => ipcRenderer.invoke('backup:status'),
+    chooseFolder: () => ipcRenderer.invoke('backup:chooseFolder'),
+    disable: () => ipcRenderer.invoke('backup:disable'),
+    runNow: () => ipcRenderer.invoke('backup:runNow'),
   },
   users: {
     list: () => ipcRenderer.invoke('users:list'),

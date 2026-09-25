@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 const { getSupabase } = require('./supabase');
+const { describeConnectionFailure } = require('./errors');
 
 const BUCKET = 'bookbin';
 
@@ -51,11 +52,9 @@ function bucket() {
 }
 
 function fail(error, what) {
-  const message = (error && error.message) || String(error);
-  if (/fetch failed|network|ENOTFOUND|ETIMEDOUT/i.test(message)) {
-    throw new Error('Cannot reach the server. Check your internet connection.');
-  }
-  throw new Error(`Could not ${what}: ${message}`);
+  const connection = describeConnectionFailure(error);
+  if (connection) throw new Error(connection);
+  throw new Error(`Could not ${what}: ${(error && error.message) || error}`);
 }
 
 /**

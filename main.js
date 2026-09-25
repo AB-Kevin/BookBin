@@ -14,6 +14,7 @@ const { registerPurchaseOrders, registerPurchaseOrderItems } = require('./ipc/pu
 const registerActivityMonitor = require('./ipc/activity');
 const registerAuth = require('./ipc/auth');
 const registerUsers = require('./ipc/users');
+const registerBackup = require('./ipc/backup');
 
 let mainWindow;
 let authController = null;
@@ -59,6 +60,16 @@ app.whenReady().then(() => {
 
   authController = registerAuth(ipcMain, () => mainWindow);
   registerUsers(ipcMain, () => authController.getProfile());
+  const backup = registerBackup(ipcMain);
+
+  // Backups read the database, so they only run once somebody is signed in.
+  // Checked on a timer as well as at startup: the app is often left open for
+  // days, and a daily backup that only happens at launch would not be daily.
+  const runBackupIfDue = () => {
+    if (authController.isSignedIn()) backup.backupIfDue();
+  };
+  setInterval(runBackupIfDue, backup.CHECK_INTERVAL_MS);
+  setTimeout(runBackupIfDue, 30 * 1000); // after startup has settled
   registerActivityMonitor(ipcMain, () => mainWindow, () => app.quit());
 
   createWindow();

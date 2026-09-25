@@ -7,6 +7,7 @@
 // and the policies ever disagree, the policies win, which is the point.
 
 const { getSupabase, clearStoredSession } = require('../db/supabase');
+const { describeConnectionFailure } = require('../db/errors');
 
 // Supabase's own messages leak implementation detail ("Invalid login
 // credentials", "AuthApiError") and are not much help to somebody who has
@@ -19,9 +20,8 @@ function friendlyAuthError(error) {
   if (/email not confirmed/i.test(message)) {
     return 'That account has not been confirmed yet. Ask an owner to confirm it.';
   }
-  if (/failed to fetch|fetch failed|network|ENOTFOUND|ETIMEDOUT/i.test(message)) {
-    return 'Cannot reach the server. Check your internet connection.';
-  }
+  const connection = describeConnectionFailure(error);
+  if (connection) return connection;
   if (/rate limit|too many/i.test(message)) {
     return 'Too many attempts. Wait a minute and try again.';
   }
@@ -125,6 +125,45 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
   });
 
   ipcMain.handle('auth:getProfile', () => currentProfile);
+
+  // Changing your own password, having proved you know the current one.
+  //
+  // Supabase's updateUser does not ask for the old password, so the check is
+  // done by signing in with it first. Be clear about what that is worth: an
+  // attacker who already has the session could call updateUser directly and
+  // skip this entirely. It is not a defence against someone who has taken
+  // over the account -- it is a defence against someone who walks up to an
+  // unlocked machine, and against changing the wrong account by accident.
+  ipcMain.handle('auth:changePassword', async (_event, currentPassword, newPassword) => {
+    const supabase = getSupabase();
+
+    const { data: userData } = await supabase.auth.getUser();
+    const email = userData && userData.user && userData.user.email;
+    if (!email) return { ok: false, error: 'You are not signed in.' };
+
+    if (String(newPassword || '').length < 8) {
+      return { ok: false, error: 'The new password must be at least 8 characters.' };
+    }
+    if (currentPassword === newPassword) {
+      return { ok: false, error: 'The new password is the same as the current one.' };
+    }
+
+    // Same user, so this refreshes the session rather than replacing it with
+    // somebody else's.
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email,
+      password: String(currentPassword || ''),
+    });
+    if (reauthError) {
+      const connection = describeConnectionFailure(reauthError);
+      return { ok: false, error: connection || 'Your current password is not correct.' };
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: String(newPassword) });
+    if (error) return { ok: false, error: friendlyAuthError(error) };
+
+    return { ok: true };
+  });
 
   return {
     getProfile: () => currentProfile,

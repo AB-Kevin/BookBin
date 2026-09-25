@@ -11,6 +11,7 @@
 
 const { getSupabase } = require('../db/supabase');
 const { table, unwrap } = require('../db/rest');
+const { describeConnectionFailure } = require('../db/errors');
 
 const PROFILE_COLUMNS = 'id, email, full_name, role, created_at';
 
@@ -49,8 +50,9 @@ async function invokeManageUsers(body) {
   // status was not 2xx, so a missing function reads like any other failure.
   if (status === 404) {
     message = 'Account management is not set up on the server yet — the manage-users function is not deployed.';
-  } else if (/Failed to fetch|fetch failed|network/i.test(message)) {
-    message = 'Cannot reach the server. Check your internet connection.';
+  } else {
+    const connection = describeConnectionFailure(error);
+    if (connection) message = connection;
   }
   throw new Error(message);
 }
