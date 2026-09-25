@@ -18,10 +18,23 @@ const PROFILE_COLUMNS = 'id, email, full_name, role, created_at';
 // actual message left in the response body. Digging it out is the difference
 // between "An account with that email already exists" and "Edge Function
 // returned a non-2xx status code".
+//
+// A reply is only a success if it says so. An absent error is not enough:
+// anything that returns 200 without confirming what it did -- a stub, a
+// proxy, a misrouted request -- would otherwise be reported as an account
+// created, closing the dialog and leaving nothing behind.
 async function invokeManageUsers(body) {
   const { data, error } = await getSupabase().functions.invoke('manage-users', { body });
-  if (!error) return data;
 
+  if (!error) {
+    if (data && data.ok === true) return data;
+    throw new Error(
+      'The server did not confirm that it worked. Check the manage-users ' +
+      'function is deployed, then look at its logs.'
+    );
+  }
+
+  const status = (error.context && error.context.status) || 0;
   let message = error.message;
   try {
     if (error.context && typeof error.context.json === 'function') {
@@ -32,11 +45,12 @@ async function invokeManageUsers(body) {
     // Body was not JSON; the generic message is all there is.
   }
 
-  if (/Failed to fetch|fetch failed|network/i.test(message)) {
+  // Match on the status, not the message: the generic text says only that the
+  // status was not 2xx, so a missing function reads like any other failure.
+  if (status === 404) {
+    message = 'Account management is not set up on the server yet — the manage-users function is not deployed.';
+  } else if (/Failed to fetch|fetch failed|network/i.test(message)) {
     message = 'Cannot reach the server. Check your internet connection.';
-  }
-  if (/not found|404/i.test(message)) {
-    message = 'Account management is not set up on the server yet.';
   }
   throw new Error(message);
 }

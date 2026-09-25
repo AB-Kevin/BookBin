@@ -91,7 +91,25 @@ Deno.serve(async (req) => {
         : error.message;
       return json(400, { error: message });
     }
-    return json(200, { ok: true, id: data.user?.id, email, role });
+
+    const id = data.user?.id;
+    if (!id) return json(500, { error: 'The account was not created.' });
+
+    // The on_auth_user_created trigger should have written this row already.
+    // Doing it again costs one statement and removes a silent failure: without
+    // a profile the account exists, cannot be listed, and is bounced straight
+    // back out at sign-in, with nothing anywhere saying why.
+    const { error: profileError } = await admin
+      .from('profiles')
+      .upsert({ id, email, full_name: fullName || null, role }, { onConflict: 'id' });
+
+    if (profileError) {
+      // Leaving an auth user with no profile would be worse than no account.
+      await admin.auth.admin.deleteUser(id);
+      return json(500, { error: `The account could not be set up: ${profileError.message}` });
+    }
+
+    return json(200, { ok: true, id, email, role });
   }
 
   if (body.action === 'delete') {
