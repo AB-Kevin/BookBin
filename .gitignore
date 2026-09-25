@@ -8,3 +8,6 @@ dist/
 # Supabase credentials. Never commit these - the repo is public.
 .env
 config/supabase.generated.json
+
+# Exported business data. Never commit - the repo is public.
+supabase/seed/

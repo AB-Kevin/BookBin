@@ -10,7 +10,8 @@
     "dist:mac": "node scripts/write-supabase-config.js && electron-builder --mac",
     "release": "node scripts/write-supabase-config.js && electron-builder --win --publish always",
     "release:mac": "node scripts/write-supabase-config.js && electron-builder --mac --publish always",
-    "config": "node scripts/write-supabase-config.js"
+    "config": "node scripts/write-supabase-config.js",
+    "export": "node scripts/export-to-supabase.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
