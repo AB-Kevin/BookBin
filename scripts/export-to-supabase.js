@@ -166,16 +166,31 @@ const ROWS_PER_INSERT = 200;
 // Postgres side afterwards. Row counts alone would pass even if every value in
 // a row landed in the wrong column, so each table also gets sums over its
 // numeric columns, and the tables with converted booleans get true-counts.
+// [column, scale] -- scale must match the column's numeric(_, scale) in the
+// schema. It matters: SQLite stores these as floats with arbitrary precision,
+// and Postgres rounds each value as it lands. Summing the raw floats and then
+// rounding gives a different answer from summing the rounded values, by a cent
+// or so, which looks exactly like corruption and is not. The expected figure
+// has to be computed the way Postgres will actually compute it: round every
+// value to the column's scale first, then add.
 const NUMERIC_SUMS = {
-  items: ['quantity_on_hand', 'default_cost', 'default_price'],
-  incoming_invoices: ['total', 'shipping_tax'],
-  incoming_invoice_lines: ['quantity', 'unit_cost', 'line_total'],
-  outgoing_invoices: ['total'],
-  outgoing_invoice_lines: ['quantity', 'unit_price', 'line_total'],
-  inventory_adjustments: ['delta'],
-  item_cost_snapshots: ['cost', 'price', 'markup_percent'],
-  purchase_order_items: ['quantity_wanted', 'max_price'],
+  items: [['quantity_on_hand', 4], ['default_cost', 4], ['default_price', 4]],
+  incoming_invoices: [['total', 2], ['shipping_tax', 2]],
+  incoming_invoice_lines: [['quantity', 4], ['unit_cost', 4], ['line_total', 2]],
+  outgoing_invoices: [['total', 2]],
+  outgoing_invoice_lines: [['quantity', 4], ['unit_price', 4], ['line_total', 2]],
+  inventory_adjustments: [['delta', 4]],
+  item_cost_snapshots: [['cost', 4], ['price', 4], ['markup_percent', 4]],
+  purchase_order_items: [['quantity_wanted', 4], ['max_price', 4]],
 };
+
+// Postgres rounds numerics half away from zero; JavaScript's Math.round rounds
+// half towards positive infinity. They disagree on negative halves, and delta
+// is routinely negative.
+function roundAtScale(value, scale) {
+  const shifted = Number(value) * Math.pow(10, scale);
+  return shifted < 0 ? -Math.round(-shifted) : Math.round(shifted);
+}
 
 // The 0/1 -> boolean conversion is the easiest thing to get silently backwards.
 const BOOLEAN_COLUMNS = {
@@ -216,19 +231,25 @@ function buildDataVerification(db, sourcePath) {
       `  case when (select last_value from pg_sequences\n` +
       `              where schemaname = 'public'\n` +
       `                and sequencename = split_part(\n` +
-      `                      pg_get_serial_sequence('public.${table}', 'id'), '.', 2)) > ${maxId}\n` +
+      `                      pg_get_serial_sequence('public.${table}', 'id'), '.', 2)) >= ${maxId}\n` +
       `       then 'PASS'\n` +
-      `       else 'FAIL - next insert would collide with existing id ${maxId}' end`
+      `       else 'FAIL - sequence is at ' || coalesce((select last_value::text from pg_sequences\n` +
+      `              where schemaname = 'public'\n` +
+      `                and sequencename = split_part(\n` +
+      `                      pg_get_serial_sequence('public.${table}', 'id'), '.', 2)), 'unset')\n` +
+      `            || ', must be at least ${maxId}' end`
     );
 
-    for (const col of NUMERIC_SUMS[table] || []) {
-      const raw = db.prepare(`select coalesce(sum("${col}"), 0) s from "${table}"`).get().s;
-      const expected = Number(Number(raw).toFixed(2));
+    for (const [col, scale] of NUMERIC_SUMS[table] || []) {
+      const values = db.prepare(`select "${col}" v from "${table}"`).all();
+      let scaled = 0;
+      for (const { v } of values) scaled += roundAtScale(v || 0, scale);
+      const expected = (scaled / Math.pow(10, scale)).toFixed(scale);
       checks.push(
         `select ${lit(table)}, ${lit('sum of ' + col)},\n` +
-        `  case when round(coalesce((select sum(${col}) from public.${table}), 0), 2) = ${expected}\n` +
+        `  case when coalesce((select sum(${col}) from public.${table}), 0) = ${expected}\n` +
         `       then 'PASS'\n` +
-        `       else 'FAIL - expected ${expected}, got ' || round(coalesce((select sum(${col}) from public.${table}), 0), 2)::text end`
+        `       else 'FAIL - expected ${expected}, got ' || coalesce((select sum(${col}) from public.${table}), 0)::text end`
       );
     }
 
@@ -448,9 +469,16 @@ function main() {
   // without this the next insert from the app would try to reuse id 1.
   out.push('-- Move each identity sequence past the ids just loaded.');
   for (const [table] of TABLES) {
+    // Three-argument form with is_called driven by whether the table has rows.
+    // Passing is_called = false would also produce the right next id, but it
+    // makes pg_sequences.last_value report NULL, which leaves the sequence
+    // state unverifiable afterwards. For a non-empty table this records
+    // last_value = max(id), is_called = true, so the next id is max + 1 and
+    // the state can be read back and checked.
     out.push(
       `select setval(pg_get_serial_sequence('public.${table}', 'id'), ` +
-      `coalesce((select max(id) from public.${table}), 0) + 1, false);`
+      `coalesce((select max(id) from public.${table}), 1), ` +
+      `(select count(*) > 0 from public.${table}));`
     );
   }
   out.push('');
