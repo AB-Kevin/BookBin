@@ -62,11 +62,16 @@ function fail(message) {
 }
 
 const env = readEnvFile();
-const url = process.env.SUPABASE_URL || env.SUPABASE_URL || '';
-const anonKey = process.env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || '';
+const pick = (name) => process.env[name] || env[name] || '';
 
-if (!url || !anonKey) {
-  const missing = [!url && 'SUPABASE_URL', !anonKey && 'SUPABASE_ANON_KEY']
+const url = pick('SUPABASE_URL');
+// Either name works: Supabase is mid-migration from the legacy anon JWT to
+// sb_publishable_ keys, and which one appears on the dashboard depends on how
+// old the project is.
+const publishableKey = pick('SUPABASE_PUBLISHABLE_KEY') || pick('SUPABASE_ANON_KEY');
+
+if (!url || !publishableKey) {
+  const missing = [!url && 'SUPABASE_URL', !publishableKey && 'SUPABASE_PUBLISHABLE_KEY']
     .filter(Boolean)
     .join(' and ');
   fail(
@@ -76,12 +81,12 @@ if (!url || !anonKey) {
   );
 }
 
-if (looksLikeServiceKey(anonKey)) {
+if (looksLikeServiceKey(publishableKey)) {
   fail(
-    'Refusing to build: SUPABASE_ANON_KEY looks like a service_role key.\n' +
+    'Refusing to build: that key looks like a secret / service_role key.\n' +
     '  That key ignores row-level security, and packaging it would give\n' +
     '  anyone who installs BookBin full read/write access to the database.\n' +
-    '  Use the anon (publishable) key from Settings -> API instead.'
+    '  Use the publishable (anon) key from Settings -> API instead.'
   );
 }
 
@@ -90,6 +95,6 @@ if (!/^https:\/\/[a-z0-9-]+\.supabase\./i.test(url)) {
 }
 
 fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
-fs.writeFileSync(OUT_FILE, JSON.stringify({ url, anonKey }, null, 2) + '\n', 'utf8');
+fs.writeFileSync(OUT_FILE, JSON.stringify({ url, publishableKey }, null, 2) + '\n', 'utf8');
 
 console.log(`Wrote ${path.relative(ROOT, OUT_FILE)} for ${url}`);

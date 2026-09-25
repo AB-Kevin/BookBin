@@ -17,6 +17,11 @@
 //
 // A packaged build has no .env and no environment, which is exactly why step
 // 3 exists; a dev run has no generated file, which is why steps 1 and 2 do.
+//
+// SUPABASE_PUBLISHABLE_KEY is the current name; SUPABASE_ANON_KEY is accepted
+// as an alias because Supabase is mid-migration from the legacy anon JWT to
+// sb_publishable_ keys, and which one a dashboard shows depends on when the
+// project was created. Both are client-safe and both are governed by RLS.
 
 const fs = require('fs');
 const path = require('path');
@@ -64,7 +69,7 @@ function readGeneratedFile(file) {
 let cached = null;
 
 /**
- * Returns { url, anonKey }, or throws with an explanation of how to fix it.
+ * Returns { url, publishableKey }, or throws with an explanation of how to fix it.
  * Throwing beats returning nulls here: a missing key surfaces at startup as
  * one clear message rather than as a confusing auth failure later on.
  */
@@ -74,13 +79,17 @@ function getSupabaseConfig() {
   const fromEnvFile = readEnvFile(ENV_FILE);
   const fromGenerated = readGeneratedFile(GENERATED_FILE);
 
-  const url =
-    process.env.SUPABASE_URL || fromEnvFile.SUPABASE_URL || fromGenerated.url || '';
-  const anonKey =
-    process.env.SUPABASE_ANON_KEY || fromEnvFile.SUPABASE_ANON_KEY || fromGenerated.anonKey || '';
+  const pick = (name) =>
+    process.env[name] || fromEnvFile[name] || '';
 
-  if (!url || !anonKey) {
-    const missing = [!url && 'SUPABASE_URL', !anonKey && 'SUPABASE_ANON_KEY']
+  const url = pick('SUPABASE_URL') || fromGenerated.url || '';
+  const publishableKey =
+    pick('SUPABASE_PUBLISHABLE_KEY') ||
+    pick('SUPABASE_ANON_KEY') ||
+    fromGenerated.publishableKey || '';
+
+  if (!url || !publishableKey) {
+    const missing = [!url && 'SUPABASE_URL', !publishableKey && 'SUPABASE_PUBLISHABLE_KEY']
       .filter(Boolean)
       .join(' and ');
     throw new Error(
@@ -91,7 +100,7 @@ function getSupabaseConfig() {
     );
   }
 
-  cached = { url, anonKey };
+  cached = { url, publishableKey };
   return cached;
 }
 
