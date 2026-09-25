@@ -4,8 +4,7 @@ const { initDatabase, backupDatabase, closeDatabase } = require('./db');
 const { getWorkspaceDir, ensureWorkspaceDirs } = require('./workspace');
 
 const registerItems = require('./ipc/items');
-const registerVendors = require('./ipc/vendors');
-const registerCustomers = require('./ipc/customers');
+const { registerVendors, registerCustomers } = require('./ipc/contacts');
 const registerIncomingInvoices = require('./ipc/incomingInvoices');
 const registerOutgoingInvoices = require('./ipc/outgoingInvoices');
 const registerSettings = require('./ipc/settings');
@@ -31,6 +30,14 @@ let authController = null;
 // read-only, via the ipcMain.handle wrapper below; that fails closed rather
 // than open if a new mutating handler is added without updating this list.
 const READONLY_EXEMPT_SUFFIXES = new Set(['list', 'get', 'history']);
+
+// Domains already moved to Supabase. The read-only guard below exists to
+// protect the shared SQLite file from a second writer; a domain that no
+// longer reads or writes that file has nothing to be protected from, and
+// blocking it would be a lock on a database it does not use. This set
+// shrinks to nothing -- along with the whole lock mechanism -- once every
+// domain has moved.
+const PORTED_DOMAINS = new Set(['vendors', 'customers']);
 const READONLY_EXEMPT_CHANNELS = new Set([
   'dashboard:summary',
   'incomingInvoices:chooseAttachment', 'incomingInvoices:openAttachment',
@@ -46,8 +53,10 @@ const READONLY_EXEMPT_CHANNELS = new Set([
 function installReadOnlyGuard() {
   const originalHandle = ipcMain.handle.bind(ipcMain);
   ipcMain.handle = (channel, listener) => {
-    const suffix = channel.includes(':') ? channel.split(':')[1] : '';
-    if (READONLY_EXEMPT_CHANNELS.has(channel) || READONLY_EXEMPT_SUFFIXES.has(suffix)) {
+    const [domain, suffix = ''] = channel.split(':');
+    if (PORTED_DOMAINS.has(domain)
+        || READONLY_EXEMPT_CHANNELS.has(channel)
+        || READONLY_EXEMPT_SUFFIXES.has(suffix)) {
       return originalHandle(channel, listener);
     }
     return originalHandle(channel, (event, ...args) => {
@@ -85,8 +94,8 @@ app.whenReady().then(() => {
   installReadOnlyGuard();
 
   registerItems(ipcMain, db);
-  registerVendors(ipcMain, db);
-  registerCustomers(ipcMain, db);
+  registerVendors(ipcMain);
+  registerCustomers(ipcMain);
   registerIncomingInvoices(ipcMain, db, workspaceDir);
   registerOutgoingInvoices(ipcMain, db, workspaceDir);
   registerSettings(ipcMain, db, workspaceDir);
