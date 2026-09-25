@@ -37,7 +37,7 @@ const READONLY_EXEMPT_SUFFIXES = new Set(['list', 'get', 'history']);
 // blocking it would be a lock on a database it does not use. This set
 // shrinks to nothing -- along with the whole lock mechanism -- once every
 // domain has moved.
-const PORTED_DOMAINS = new Set(['vendors', 'customers']);
+const PORTED_DOMAINS = new Set(['vendors', 'customers', 'items']);
 const READONLY_EXEMPT_CHANNELS = new Set([
   'dashboard:summary',
   'incomingInvoices:chooseAttachment', 'incomingInvoices:openAttachment',
@@ -93,7 +93,7 @@ app.whenReady().then(() => {
 
   installReadOnlyGuard();
 
-  registerItems(ipcMain, db);
+  registerItems(ipcMain);
   registerVendors(ipcMain);
   registerCustomers(ipcMain);
   registerIncomingInvoices(ipcMain, db, workspaceDir);
