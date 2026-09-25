@@ -29,6 +29,22 @@ const coerceLine = numericColumns('quantity', 'unit_cost', 'line_total');
 module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
   const attachments = createAttachments('incoming', workspaceDir);
 
+  // The SQLite list flattened the vendor join and rolled the line descriptions
+  // into one GROUP_CONCAT string. PostgREST returns them nested instead, so
+  // they are flattened back to the exact shape the table screen reads.
+  function flattenListRow(row) {
+    const lines = row.incoming_invoice_lines || [];
+    const names = lines.map((line) => (line.items && line.items.name) || line.description);
+    const flat = coerceInvoice(row);
+    delete flat.vendors;
+    delete flat.incoming_invoice_lines;
+    return {
+      ...flat,
+      vendor_name: (row.vendors && row.vendors.name) || null,
+      line_items: names.length ? names.join('||') : null,
+    };
+  }
+
   async function getFullInvoice(id) {
     const row = unwrap(
       await table('incoming_invoices')
