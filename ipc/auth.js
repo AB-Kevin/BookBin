@@ -6,7 +6,12 @@
 // user can edit this app's JavaScript but cannot edit Postgres. If this file
 // and the policies ever disagree, the policies win, which is the point.
 
-const { getSupabase, clearStoredSession } = require('../db/supabase');
+const {
+  getSupabase,
+  getCurrentDatabase,
+  createScratchClient,
+  clearStoredSession,
+} = require('../db/supabase');
 const { describeConnectionFailure } = require('../db/errors');
 
 // Supabase's own messages leak implementation detail ("Invalid login
@@ -28,14 +33,52 @@ function friendlyAuthError(error) {
   return message;
 }
 
+// Checks a password without touching the open session. Signing in on the
+// real client would check it too, but would also replace the session --
+// harmless when it is the same person, a silent account switch if not.
+async function verifyPassword(email, password) {
+  let scratch;
+  try {
+    scratch = createScratchClient();
+  } catch (err) {
+    return { ok: false, connection: err.message };
+  }
+  const { error } = await scratch.auth.signInWithPassword({
+    email,
+    password: String(password || ''),
+  });
+  if (error) return { ok: false, connection: describeConnectionFailure(error) };
+
+  // The check made a real session on the server. End just that one: the
+  // default scope would sign the person out everywhere, this window included.
+  try {
+    await scratch.auth.signOut({ scope: 'local' });
+  } catch (err) {
+    // It expires on its own; nothing holds its refresh token.
+  }
+  return { ok: true };
+}
+
 module.exports = function registerAuth(ipcMain, getMainWindow) {
   let currentProfile = null;
+  const resetListeners = [];
+
+  // Anything held for the signed-in person -- the owner unlock on the Users
+  // page, say -- is dropped whenever that person stops being signed in here.
+  function reset() {
+    currentProfile = null;
+    for (const listener of resetListeners) listener();
+  }
 
   async function loadProfile() {
+    if (!getCurrentDatabase()) {
+      reset();
+      return null;
+    }
     const supabase = getSupabase();
     const { data: userData } = await supabase.auth.getUser();
     if (!userData || !userData.user) {
-      currentProfile = null;
+      reset();
       return null;
     }
 
@@ -47,7 +90,7 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
 
     if (error) {
       console.error('BookBin: could not load profile —', error.message);
-      currentProfile = null;
+      reset();
       return null;
     }
 
@@ -55,7 +98,7 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
     // but was never given access -- every RLS policy will deny it, so treat it
     // as not signed in rather than showing an app that silently does nothing.
     if (!data) {
-      currentProfile = null;
+      reset();
       return null;
     }
 
@@ -76,6 +119,7 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
   }
 
   ipcMain.handle('auth:signIn', async (_event, email, password) => {
+    if (!getCurrentDatabase()) return { ok: false, error: 'Choose a database first.' };
     const supabase = getSupabase();
     const { error } = await supabase.auth.signInWithPassword({
       email: String(email || '').trim(),
@@ -99,16 +143,17 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
   });
 
   ipcMain.handle('auth:signOut', async () => {
-    const supabase = getSupabase();
     try {
-      await supabase.auth.signOut();
+      // Local scope: signs out this computer only. The default would end the
+      // person's sessions everywhere, which is not what the button says.
+      if (getCurrentDatabase()) await getSupabase().auth.signOut({ scope: 'local' });
     } catch (err) {
       // Network failure should not strand somebody in a session they asked to
       // leave; the local session is cleared either way below.
       console.error('BookBin: sign-out call failed —', err.message);
     }
     clearStoredSession();
-    currentProfile = null;
+    reset();
     broadcast();
     return { ok: true };
   });
@@ -126,15 +171,25 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
 
   ipcMain.handle('auth:getProfile', () => currentProfile);
 
+  // Re-reads the signed-in person's profile -- after their own role changed,
+  // say -- and tells the window, which redraws to match.
+  ipcMain.handle('auth:refresh', async () => {
+    await loadProfile();
+    broadcast();
+    return currentProfile;
+  });
+
   // Changing your own password, having proved you know the current one.
   //
   // Supabase's updateUser does not ask for the old password, so the check is
-  // done by signing in with it first. Be clear about what that is worth: an
+  // done by signing in with it first, on a throwaway client (see
+  // verifyPassword). Be clear about what that is worth: an
   // attacker who already has the session could call updateUser directly and
   // skip this entirely. It is not a defence against someone who has taken
   // over the account -- it is a defence against someone who walks up to an
   // unlocked machine, and against changing the wrong account by accident.
   ipcMain.handle('auth:changePassword', async (_event, currentPassword, newPassword) => {
+    if (!currentProfile) return { ok: false, error: 'You are not signed in.' };
     const supabase = getSupabase();
 
     const { data: userData } = await supabase.auth.getUser();
@@ -148,15 +203,9 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
       return { ok: false, error: 'The new password is the same as the current one.' };
     }
 
-    // Same user, so this refreshes the session rather than replacing it with
-    // somebody else's.
-    const { error: reauthError } = await supabase.auth.signInWithPassword({
-      email,
-      password: String(currentPassword || ''),
-    });
-    if (reauthError) {
-      const connection = describeConnectionFailure(reauthError);
-      return { ok: false, error: connection || 'Your current password is not correct.' };
+    const check = await verifyPassword(email, currentPassword);
+    if (!check.ok) {
+      return { ok: false, error: check.connection || 'Your current password is not correct.' };
     }
 
     const { error } = await supabase.auth.updateUser({ password: String(newPassword) });
@@ -167,6 +216,20 @@ module.exports = function registerAuth(ipcMain, getMainWindow) {
 
   return {
     getProfile: () => currentProfile,
+    verifyPassword,
+    onReset: (listener) => resetListeners.push(listener),
+    // Called when a database is opened: signs straight back in if this machine
+    // still holds a good session for it, and returns null if not.
+    loadForOpenDatabase: async () => {
+      try {
+        return await loadProfile();
+      } catch (err) {
+        console.error('BookBin: session restore failed —', err.message);
+        reset();
+        return null;
+      }
+    },
+    closeDatabase: () => reset(),
     isSignedIn: () => currentProfile !== null,
     isOwner: () => !!currentProfile && currentProfile.role === 'owner',
     refresh: async () => {

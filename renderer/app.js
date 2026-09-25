@@ -13,9 +13,10 @@ const NAV_ITEMS = [
   { path: 'outgoing-invoices', label: 'Outgoing Invoices', icon: '📤' },
   { path: 'purchase-orders', label: 'Purchase Orders', icon: '📝' },
   { path: 'settings', label: 'Settings', icon: '⚙️' },
-  // Hidden from managers. That is presentation only -- the database and the
-  // Edge Function are what actually refuse them.
-  { path: 'users', label: 'Users', icon: '👤', ownerOnly: true },
+  // Everyone gets this page for their own password; only owners see the
+  // account controls on it. Hiding those is presentation only -- the main
+  // process, the database and the Edge Function are what refuse a manager.
+  { path: 'users', label: 'Users', icon: '👤' },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = 'bookbin.sidebarCollapsed';
@@ -91,9 +92,16 @@ function screenFor(section) {
   return map[section] || window.Screens.dashboard;
 }
 
+let lastSection = null;
+
 async function render() {
   if (!currentProfile) return;
   const { section, param, rest } = parseHash();
+
+  // Leaving the Users page locks account management again, so an owner who
+  // unlocked it and walked on to something else has not left it open.
+  if (lastSection === 'users' && section !== 'users') window.api.users.lock();
+  lastSection = section;
   window.Helpers.qsa('.nav-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.section === section);
   });
@@ -164,9 +172,15 @@ function openReleasesPage() {
   window.api.updates.openReleasesPage();
 }
 
+// Drawn into every element marked data-update-widget: the sidebar footer, and
+// the start screen, which is where it matters most -- an update must never
+// depend on being able to sign in.
 function renderUpdateWidget() {
-  const footer = document.getElementById('sidebar-footer');
-  if (!footer) return;
+  document.querySelectorAll('[data-update-widget]').forEach(renderUpdateWidgetInto);
+}
+window.renderUpdateWidgets = renderUpdateWidget;
+
+function renderUpdateWidgetInto(footer) {
   const { escapeHtml } = window.Helpers;
   const s = updateStatus;
   let action;
@@ -296,15 +310,29 @@ function renderUserWidget() {
   const { escapeHtml } = window.Helpers;
   const name = currentProfile.fullName || currentProfile.email || 'Signed in';
   const role = currentProfile.role === 'owner' ? 'Owner' : 'Manager';
+  const database = window.CurrentDatabase;
   box.innerHTML = `
     <div class="user-row" title="${escapeHtml(currentProfile.email || '')}">
       <span class="user-name">${escapeHtml(name)}</span>
-      <span class="user-role">${escapeHtml(role)}</span>
+      <span class="user-role">${escapeHtml(role)}${database ? ` · ${escapeHtml(database.name)}` : ''}</span>
     </div>
+    <button class="user-signout" id="switch-db-btn" type="button" title="Switch database" aria-label="Switch database"><span class="signout-label">Switch database</span><span class="signout-icon" aria-hidden="true">⇄</span></button>
     <button class="user-signout" id="sign-out-btn" type="button" title="Sign out" aria-label="Sign out"><span class="signout-label">Sign out</span><span class="signout-icon" aria-hidden="true">⎋</span></button>
   `;
   box.querySelector('#sign-out-btn').addEventListener('click', async () => {
     await window.api.auth.signOut();
+  });
+  // Keeps this database's sign-in saved, so coming back to it later does not
+  // ask for the password; Sign out is what forgets it.
+  box.querySelector('#switch-db-btn').addEventListener('click', async () => {
+    if (window.Helpers.hasUnsavedChanges()
+      && !(await window.Helpers.confirmAction('You have unsaved changes. Leave this database anyway?'))) {
+      return;
+    }
+    window.Helpers.clearNavigationGuard();
+    await window.api.databases.close();
+    window.CurrentDatabase = null;
+    applyProfile(null);
   });
 }
 
@@ -314,23 +342,35 @@ function startApp() {
   if (appStarted) return;
   appStarted = true;
   initSidebarToggle();
-  initUpdateWidget();
   initActivityBanner();
 }
+
+// Which database the app last showed. Opening a different one starts it on
+// the dashboard rather than on, say, an invoice id from the previous one.
+let shownDatabaseId = null;
 
 function applyProfile(profile) {
   currentProfile = profile || null;
   document.body.classList.toggle('signed-out', !currentProfile);
   window.CurrentProfile = currentProfile;
   if (currentProfile) {
+    const database = window.CurrentDatabase;
+    if (database && database.id !== shownDatabaseId) {
+      shownDatabaseId = database.id;
+      lastSection = null;
+      history.replaceState(null, '', '#/dashboard');
+    }
     startApp();
     buildNav();
     renderUserWidget();
     render();
   } else {
     renderUserWidget();
-    window.Login.reset();
-    window.Login.show();
+    document.getElementById('content').innerHTML = '';
+    // Signed out of an open database: back to its sign-in. No database open:
+    // back to the list.
+    if (window.CurrentDatabase) window.Launcher.showLogin();
+    else window.Launcher.showList();
   }
 }
 
@@ -338,14 +378,12 @@ async function initAuth() {
   // Start hidden rather than flashing the app for the moment it takes to
   // learn there is no session.
   document.body.classList.add('signed-out');
-  let profile = null;
-  try {
-    profile = await window.api.auth.getSession();
-  } catch (err) {
-    console.error('session check failed', err);
-  }
-  applyProfile(profile);
+  // Before anything else, and before any database: updating must never
+  // depend on signing in.
+  initUpdateWidget();
+  window.Launcher.init(applyProfile);
   window.api.auth.onChanged(applyProfile);
+  window.Launcher.showList();
 }
 
 window.addEventListener('hashchange', render);

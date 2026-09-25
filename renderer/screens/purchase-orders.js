@@ -14,6 +14,34 @@ window.Screens.purchaseOrders = async function renderPurchaseOrders(container, p
   return renderLinesList(container, poId);
 };
 
+// Shared by the list and the detail page. Allowed on closed orders too: the
+// name isn't part of what closing freezes.
+function openRenameModal(po, onRenamed) {
+  const { escapeHtml, qs, showModal, hideModal } = window.Helpers;
+  const modal = showModal(`
+    <h2>Rename Purchase Order</h2>
+    <form id="rename-order-form">
+      <label>Name<input name="name" required value="${escapeHtml(po.name)}" /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="cancel-btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  `);
+  const input = qs('input[name="name"]', modal);
+  input.focus();
+  input.select();
+  qs('#cancel-btn', modal).addEventListener('click', hideModal);
+  qs('#rename-order-form', modal).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = String(new FormData(e.target).get('name')).trim();
+    if (!name) return;
+    await window.api.purchaseOrders.update(po.id, { name });
+    hideModal();
+    onRenamed();
+  });
+}
+
 async function renderOrdersList(container) {
   const { escapeHtml, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState, showModal, hideModal } = window.Helpers;
 
@@ -43,6 +71,7 @@ async function renderOrdersList(container) {
                   ${sortableHeader('Lines', 'line_count', sortState, 'num')}
                   ${sortableHeader('Wanted', 'total_wanted', sortState, 'num')}
                   ${sortableHeader('Bought', 'total_bought', sortState, 'num')}
+                  ${sortableHeader('Vendor Orders', 'vendor_todo', sortState, 'num')}
                   <th></th>
                 </tr>
               </thead>
@@ -55,8 +84,12 @@ async function renderOrdersList(container) {
                       <td class="num">${po.line_count}</td>
                       <td class="num">${po.total_wanted}</td>
                       <td class="num">${po.total_bought}</td>
+                      <td class="num">${po.vendor_todo == null
+                        ? ''
+                        : po.vendor_todo === 0 ? '<span class="muted">All done</span>' : `${po.vendor_todo} to do`}</td>
                       <td class="actions"><div class="actions-row">
                         <button class="btn small" data-edit="${po.id}">Edit</button>
+                        <button class="btn small" data-rename="${po.id}">Rename</button>
                         ${po.status === 'open'
                           ? `<button class="btn small" data-complete="${po.id}">Complete</button>`
                           : `<button class="btn small" data-reopen="${po.id}">Reopen</button>`}
@@ -73,6 +106,12 @@ async function renderOrdersList(container) {
     qs('#new-order', container).addEventListener('click', openNewOrderModal);
     qsa('[data-edit]', container).forEach((btn) =>
       btn.addEventListener('click', () => window.Helpers.navigate(`/purchase-orders/${btn.dataset.edit}`))
+    );
+    qsa('[data-rename]', container).forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const po = orders.find((o) => o.id === Number(btn.dataset.rename));
+        if (po) openRenameModal(po, load);
+      })
     );
     qsa('[data-complete]', container).forEach((btn) =>
       btn.addEventListener('click', async () => {
@@ -124,10 +163,12 @@ async function renderOrdersList(container) {
 }
 
 async function renderLinesList(container, poId) {
-  const { escapeHtml, formatMoney, formatDate, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState } = window.Helpers;
+  const { escapeHtml, formatMoney, formatDate, confirmAction, qs, qsa, sortedRows, sortableHeader, wireSortableHeaders, createSortState, showModal, hideModal } = window.Helpers;
 
   let po = null;
   let lines = [];
+  let vendorOrders = [];
+  let vendorOrdersError = null;
   const sortState = createSortState('created_at', 'desc');
   const expandedIds = new Set();
   const invoicesCache = new Map();
@@ -137,7 +178,111 @@ async function renderLinesList(container, poId) {
       window.api.purchaseOrders.get(poId),
       window.api.purchaseOrderItems.list(poId),
     ]);
+    // Loaded separately so a database that has not had the vendor-orders
+    // tables added yet still shows its lines, with a note instead of an error
+    // page.
+    try {
+      vendorOrders = await window.api.purchaseOrderVendors.list(poId);
+      vendorOrdersError = null;
+    } catch (err) {
+      vendorOrders = [];
+      vendorOrdersError = /purchase_order_vendors|schema cache|does not exist/i.test(err.message)
+        ? 'This database has not been updated for vendor orders yet. An owner can update it from '
+          + 'the start screen with "Set up a new one", choosing this database\'s project.'
+        : err.message;
+    }
     render();
+  }
+
+  // What is left to do with a vendor-order invoice depends on where it ships:
+  // to the warehouse it only needs paying, to me it needs receiving as well.
+  function invoiceDone(inv, shipsTo) {
+    return inv.paid && (shipsTo === 'warehouse' || inv.received);
+  }
+
+  function vendorSummary(order) {
+    const invoices = order.invoices;
+    if (!invoices.length) return 'No invoices linked yet';
+    const unpaid = invoices.filter((inv) => !inv.paid);
+    const unpaidTotal = unpaid.reduce((sum, inv) => sum + inv.total, 0);
+    const parts = [];
+    if (order.ships_to === 'me') {
+      const toReceive = invoices.filter((inv) => !inv.received).length;
+      if (toReceive) parts.push(`${toReceive} to receive`);
+    }
+    if (unpaid.length) parts.push(`${formatMoney(unpaidTotal)} unpaid`);
+    return parts.length
+      ? parts.join(' · ')
+      : order.ships_to === 'me' ? 'All received and paid' : 'All paid';
+  }
+
+  function vendorOrdersHtml(isClosed) {
+    const body = vendorOrdersError
+      ? `<p class="muted">${escapeHtml(vendorOrdersError)}</p>`
+      : vendorOrders.length === 0
+        ? '<p class="muted small">None. Add a vendor here when someone else orders books from them and you pay the invoices.</p>'
+        : vendorOrders.map((order) => vendorOrderHtml(order, isClosed)).join('');
+    return `
+      <section class="card">
+        <div class="page-header">
+          <h2 style="margin: 0;">Vendor Orders</h2>
+          ${!isClosed && !vendorOrdersError ? '<button class="btn" id="track-vendor">+ Track Vendor</button>' : ''}
+        </div>
+        ${body}
+      </section>
+    `;
+  }
+
+  function vendorOrderHtml(order, isClosed) {
+    const toMe = order.ships_to === 'me';
+    const total = order.invoices.reduce((sum, inv) => sum + inv.total, 0);
+    return `
+      <div class="vendor-order">
+        <div class="vendor-order-header">
+          <div>
+            <strong>${escapeHtml(order.vendor_name)}</strong>
+            <span class="badge ${toMe ? 'ships-me' : 'ships-warehouse'}">${toMe ? 'Ships to me' : 'Ships to warehouse'}</span>
+            <span class="muted small">${escapeHtml(vendorSummary(order))}</span>
+          </div>
+          ${!isClosed ? `
+            <div class="actions-row">
+              <button class="btn small" data-link-vendor="${order.id}">Link Invoices…</button>
+              <button class="btn small" data-edit-vendor="${order.id}">Edit</button>
+              <button class="btn small danger" data-remove-vendor="${order.id}">Remove</button>
+            </div>` : ''}
+        </div>
+        ${order.notes ? `<p class="muted small vendor-order-notes">${escapeHtml(order.notes)}</p>` : ''}
+        ${order.invoices.length ? `
+          <table>
+            <thead><tr>
+              <th>Invoice</th><th>Date</th><th class="num">Total</th>
+              <th class="checkbox-col">Paid</th><th class="checkbox-col">Received</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${order.invoices.map((inv) => `
+                <tr class="${invoiceDone(inv, order.ships_to) ? 'po-row-full' : ''}">
+                  <td><a href="#" data-open-invoice="${inv.id}">${escapeHtml(inv.invoice_number)}</a></td>
+                  <td>${formatDate(inv.invoice_date)}</td>
+                  <td class="num">${formatMoney(inv.total)}</td>
+                  <td class="checkbox-col"><input type="checkbox" data-flag="paid" data-invoice="${inv.id}" ${inv.paid ? 'checked' : ''} /></td>
+                  <td class="checkbox-col">${toMe
+                    ? `<input type="checkbox" data-flag="received" data-invoice="${inv.id}" ${inv.received ? 'checked' : ''} />`
+                    : '<span class="muted" title="Shipped to the warehouse — nothing to receive here">—</span>'}</td>
+                  <td class="actions">${!isClosed
+                    ? `<button class="btn small" data-unlink="${inv.id}" title="Take this invoice off the purchase order">Unlink</button>`
+                    : ''}</td>
+                </tr>
+              `).join('')}
+              ${order.invoices.length > 1 ? `
+                <tr class="vendor-order-total">
+                  <td colspan="2">Total</td>
+                  <td class="num">${formatMoney(total)}</td>
+                  <td colspan="3"></td>
+                </tr>` : ''}
+            </tbody>
+          </table>` : ''}
+      </div>
+    `;
   }
 
   function progressStatus(wanted, bought) {
@@ -180,6 +325,7 @@ async function renderLinesList(container, poId) {
           <h1>${escapeHtml(po.name)} <span class="badge status-${po.status}">${escapeHtml(po.status)}</span></h1>
         </div>
         <div class="header-actions">
+          <button class="btn" id="rename-btn">Rename</button>
           ${isClosed
             ? '<button class="btn" id="reopen-btn">Reopen</button>'
             : '<button class="btn" id="complete-btn">Complete</button><button class="btn primary" id="new-line">+ New Line</button>'}
@@ -246,12 +392,15 @@ async function renderLinesList(container, poId) {
               </tbody>
             </table>`}
       </section>
+      ${vendorOrdersHtml(isClosed)}
     `;
 
     qs('#back-link', container).addEventListener('click', (e) => {
       e.preventDefault();
       window.Helpers.navigate('/purchase-orders');
     });
+    wireVendorOrders(isClosed);
+    qs('#rename-btn', container).addEventListener('click', () => openRenameModal(po, load));
 
     if (!isClosed) {
       qs('#new-line', container).addEventListener('click', () => window.Helpers.navigate(`/purchase-orders/${poId}/lines/new`));
@@ -283,6 +432,188 @@ async function renderLinesList(container, poId) {
       btn.addEventListener('click', () => toggleInvoices(Number(btn.dataset.toggle)))
     );
     wireSortableHeaders(container, sortState, render);
+  }
+
+  function wireVendorOrders(isClosed) {
+    const findOrder = (id) => vendorOrders.find((o) => o.id === Number(id));
+
+    qsa('[data-open-invoice]', container).forEach((link) =>
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.Helpers.navigate(`/incoming-invoices/${link.dataset.openInvoice}`);
+      })
+    );
+
+    // Paid and received belong to the invoice, not the PO, so they stay
+    // editable on a closed PO -- a bill does not stop needing paying because
+    // the order was marked complete.
+    qsa('[data-flag]', container).forEach((box) =>
+      box.addEventListener('change', async () => {
+        const invoiceId = Number(box.dataset.invoice);
+        const invoice = vendorOrders.flatMap((o) => o.invoices).find((inv) => inv.id === invoiceId);
+        if (!invoice) return;
+        const flags = { paid: invoice.paid, received: invoice.received, [box.dataset.flag]: box.checked };
+        box.disabled = true;
+        try {
+          await window.api.incomingInvoices.setFlags(invoiceId, flags);
+          Object.assign(invoice, flags);
+        } catch (err) {
+          box.checked = !box.checked;
+          await confirmAction(err.message);
+        }
+        render();
+      })
+    );
+
+    if (isClosed || vendorOrdersError) return;
+
+    qs('#track-vendor', container).addEventListener('click', () => openVendorForm(null));
+    qsa('[data-edit-vendor]', container).forEach((btn) =>
+      btn.addEventListener('click', () => openVendorForm(findOrder(btn.dataset.editVendor)))
+    );
+    qsa('[data-link-vendor]', container).forEach((btn) =>
+      btn.addEventListener('click', () => openLinkInvoices(findOrder(btn.dataset.linkVendor)))
+    );
+    qsa('[data-remove-vendor]', container).forEach((btn) =>
+      btn.addEventListener('click', async () => {
+        const order = findOrder(btn.dataset.removeVendor);
+        if (!order) return;
+        const count = order.invoices.length;
+        if (!(await confirmAction(
+          `Stop tracking ${order.vendor_name} on this purchase order?` +
+          (count ? ` Its ${count} linked invoice${count === 1 ? '' : 's'} will be unlinked — the invoices themselves are not changed.` : '')
+        ))) return;
+        await runAndReload(() => window.api.purchaseOrderVendors.delete(order.id));
+      })
+    );
+    qsa('[data-unlink]', container).forEach((btn) =>
+      btn.addEventListener('click', async () => {
+        await runAndReload(() => window.api.purchaseOrderVendors.unlink(Number(btn.dataset.unlink)));
+      })
+    );
+  }
+
+  async function runAndReload(action) {
+    try {
+      await action();
+    } catch (err) {
+      await confirmAction(err.message);
+    }
+    load();
+  }
+
+  async function openVendorForm(order) {
+    const isEdit = Boolean(order);
+    let vendorOptions = '';
+    if (!isEdit) {
+      const tracked = new Set(vendorOrders.map((o) => o.vendor_id));
+      const vendors = (await window.api.vendors.list()).filter((v) => !tracked.has(v.id));
+      if (!vendors.length) {
+        await confirmAction('Every vendor is already on this purchase order. Add the vendor under Vendors first.');
+        return;
+      }
+      vendorOptions = '<option value="">Select vendor…</option>' + vendors
+        .map((v) => `<option value="${v.id}">${escapeHtml(v.name)}</option>`)
+        .join('');
+    }
+    const shipsTo = isEdit ? order.ships_to : 'warehouse';
+
+    const modal = showModal(`
+      <h2>${isEdit ? escapeHtml(order.vendor_name) : 'Track a Vendor'}</h2>
+      <form id="vendor-order-form">
+        ${!isEdit ? `<label>Vendor<select name="vendor_id" required>${vendorOptions}</select></label>` : ''}
+        <fieldset class="radio-group">
+          <legend>Orders ship to</legend>
+          <label class="checkbox"><input type="radio" name="ships_to" value="warehouse" ${shipsTo === 'warehouse' ? 'checked' : ''} />
+            The warehouse — I only pay the invoices</label>
+          <label class="checkbox"><input type="radio" name="ships_to" value="me" ${shipsTo === 'me' ? 'checked' : ''} />
+            Me — I receive the books and pay the invoices</label>
+        </fieldset>
+        <label>Notes<textarea name="notes" placeholder="e.g. what is being ordered, and by whom">${escapeHtml(isEdit ? order.notes || '' : '')}</textarea></label>
+        <div class="form-error" id="vendor-order-error" role="alert"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="cancel-btn">Cancel</button>
+          <button type="submit" class="btn primary">${isEdit ? 'Save' : 'Add'}</button>
+        </div>
+      </form>
+    `);
+    qs('#cancel-btn', modal).addEventListener('click', hideModal);
+    qs('#vendor-order-form', modal).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const data = { ships_to: form.get('ships_to'), notes: form.get('notes') };
+      try {
+        if (isEdit) {
+          await window.api.purchaseOrderVendors.update(order.id, data);
+        } else {
+          await window.api.purchaseOrderVendors.create({
+            ...data,
+            purchase_order_id: poId,
+            vendor_id: Number(form.get('vendor_id')),
+          });
+        }
+      } catch (err) {
+        qs('#vendor-order-error', modal).textContent = err.message;
+        return;
+      }
+      hideModal();
+      await load();
+      // A newly tracked vendor's next step is almost always linking invoices.
+      if (!isEdit) {
+        const added = vendorOrders.find((o) => o.vendor_id === Number(form.get('vendor_id')));
+        if (added) openLinkInvoices(added);
+      }
+    });
+  }
+
+  async function openLinkInvoices(order) {
+    if (!order) return;
+    const candidates = await window.api.purchaseOrderVendors.candidates(order.id);
+    const modal = showModal(`
+      <h2>Link ${escapeHtml(order.vendor_name)} Invoices</h2>
+      ${candidates.length === 0
+        ? `<p class="muted">Every invoice from ${escapeHtml(order.vendor_name)} is already on a purchase order,
+             or there are none yet. Enter new ones under Incoming Invoices, then link them here.</p>
+           <div class="modal-actions"><button type="button" class="btn" id="cancel-btn">Close</button></div>`
+        : `<p class="muted small">Invoices from ${escapeHtml(order.vendor_name)} that are not on any purchase order yet.
+             Tick the ones that belong to this one.</p>
+           <form id="link-form">
+             <div class="link-list">
+               ${candidates.map((inv) => `
+                 <label class="checkbox link-row">
+                   <input type="checkbox" name="invoice" value="${inv.id}" />
+                   <span class="link-number">${escapeHtml(inv.invoice_number)}</span>
+                   <span class="muted">${formatDate(inv.invoice_date)}</span>
+                   <span class="num">${formatMoney(inv.total)}</span>
+                 </label>
+               `).join('')}
+             </div>
+             <div class="form-error" id="link-error" role="alert"></div>
+             <div class="modal-actions">
+               <button type="button" class="btn" id="cancel-btn">Cancel</button>
+               <button type="submit" class="btn primary">Link</button>
+             </div>
+           </form>`}
+    `);
+    qs('#cancel-btn', modal).addEventListener('click', hideModal);
+    const form = qs('#link-form', modal);
+    if (!form) return;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const ids = new FormData(e.target).getAll('invoice').map(Number);
+      if (!ids.length) {
+        qs('#link-error', modal).textContent = 'Tick at least one invoice.';
+        return;
+      }
+      try {
+        await window.api.purchaseOrderVendors.link(order.id, ids);
+      } catch (err) {
+        qs('#link-error', modal).textContent = err.message;
+        return;
+      }
+      hideModal();
+      load();
+    });
   }
 
   async function toggleInvoices(id) {

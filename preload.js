@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
     signOut: () => ipcRenderer.invoke('auth:signOut'),
     getSession: () => ipcRenderer.invoke('auth:getSession'),
     getProfile: () => ipcRenderer.invoke('auth:getProfile'),
+    refresh: () => ipcRenderer.invoke('auth:refresh'),
     changePassword: (currentPassword, newPassword) =>
       ipcRenderer.invoke('auth:changePassword', currentPassword, newPassword),
     onChanged: (callback) => {
@@ -58,11 +59,36 @@ contextBridge.exposeInMainWorld('api', {
     disable: () => ipcRenderer.invoke('backup:disable'),
     runNow: () => ipcRenderer.invoke('backup:runNow'),
   },
+  databases: {
+    list: () => ipcRenderer.invoke('databases:list'),
+    current: () => ipcRenderer.invoke('databases:current'),
+    add: (fields) => ipcRenderer.invoke('databases:add', fields),
+    addFromCode: (code, name) => ipcRenderer.invoke('databases:addFromCode', code, name),
+    rename: (id, name) => ipcRenderer.invoke('databases:rename', id, name),
+    remove: (id) => ipcRenderer.invoke('databases:remove', id),
+    connectionCode: (id) => ipcRenderer.invoke('databases:connectionCode', id),
+    open: (id) => ipcRenderer.invoke('databases:open', id),
+    close: () => ipcRenderer.invoke('databases:close'),
+  },
+  setup: {
+    listProjects: (token) => ipcRenderer.invoke('setup:listProjects', token),
+    inspect: (token, ref) => ipcRenderer.invoke('setup:inspect', token, ref),
+    run: (options) => ipcRenderer.invoke('setup:run', options),
+    onProgress: (callback) => {
+      const listener = (_event, message) => callback(message);
+      ipcRenderer.on('setup:progress', listener);
+      return () => ipcRenderer.removeListener('setup:progress', listener);
+    },
+  },
   users: {
+    lockStatus: () => ipcRenderer.invoke('users:lockStatus'),
+    unlock: (password) => ipcRenderer.invoke('users:unlock', password),
+    lock: () => ipcRenderer.invoke('users:lock'),
     list: () => ipcRenderer.invoke('users:list'),
     create: (data) => ipcRenderer.invoke('users:create', data),
     delete: (userId) => ipcRenderer.invoke('users:delete', userId),
     setRole: (userId, role) => ipcRenderer.invoke('users:setRole', userId, role),
+    setPassword: (userId, password) => ipcRenderer.invoke('users:setPassword', userId, password),
   },
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
@@ -79,6 +105,15 @@ contextBridge.exposeInMainWorld('api', {
     ...makeCrud('purchaseOrders'),
     close: (id) => ipcRenderer.invoke('purchaseOrders:close', id),
     reopen: (id) => ipcRenderer.invoke('purchaseOrders:reopen', id),
+  },
+  purchaseOrderVendors: {
+    list: (purchaseOrderId) => ipcRenderer.invoke('purchaseOrderVendors:list', purchaseOrderId),
+    create: (data) => ipcRenderer.invoke('purchaseOrderVendors:create', data),
+    update: (id, data) => ipcRenderer.invoke('purchaseOrderVendors:update', id, data),
+    delete: (id) => ipcRenderer.invoke('purchaseOrderVendors:delete', id),
+    candidates: (id) => ipcRenderer.invoke('purchaseOrderVendors:candidates', id),
+    link: (id, invoiceIds) => ipcRenderer.invoke('purchaseOrderVendors:link', id, invoiceIds),
+    unlink: (invoiceId) => ipcRenderer.invoke('purchaseOrderVendors:unlink', invoiceId),
   },
   purchaseOrderItems: {
     list: (purchaseOrderId) => ipcRenderer.invoke('purchaseOrderItems:list', purchaseOrderId),

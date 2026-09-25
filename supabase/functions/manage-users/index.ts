@@ -1,4 +1,4 @@
-// Creating and deleting BookBin accounts.
+// Creating and deleting BookBin accounts, and setting their passwords.
 //
 // This exists because creating a user requires Supabase's admin API, which
 // requires the service_role key -- a key that ignores every row-level security
@@ -14,9 +14,27 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+// Supabase is moving from the legacy anon / service_role JWTs to sb_ keys, and
+// projects made since late 2025 have only the new ones. Those arrive as JSON
+// dictionaries of named keys; the legacy variables are read only if they are
+// absent, so this runs unchanged on old projects and new.
+function projectKey(dictionaryVar: string, legacyVar: string): string {
+  const dictionary = Deno.env.get(dictionaryVar);
+  if (dictionary) {
+    try {
+      const keys = JSON.parse(dictionary) as Record<string, string>;
+      const key = keys.default ?? Object.values(keys)[0];
+      if (key) return key;
+    } catch {
+      // Not JSON; fall through to the legacy variable.
+    }
+  }
+  return Deno.env.get(legacyVar) ?? '';
+}
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
-const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const ANON_KEY = projectKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY');
+const SERVICE_ROLE_KEY = projectKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY');
 
 const ROLES = ['owner', 'manager'];
 
@@ -24,7 +42,7 @@ const ROLES = ['owner', 'manager'];
 // dashboard's default template, say -- prints nothing, which is exactly the
 // difference between "my function refused the request" and "my function was
 // never there". Bump it when changing this file.
-const VERSION = 'manage-users v1';
+const VERSION = 'manage-users v3';
 console.log(`${VERSION} booted`);
 
 function json(status: number, body: unknown) {
@@ -46,7 +64,9 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  const { data: user } = await caller.auth.getUser();
+  // The token is passed explicitly: a client with no stored session does not
+  // reliably fall back to the Authorization header when asked who it is.
+  const { data: user } = await caller.auth.getUser(authHeader.replace(/^Bearer\s+/i, ''));
   if (!user?.user) return json(401, { error: 'Not signed in.' });
 
   const { data: isOwner, error: roleError } = await caller.rpc('is_owner');
@@ -149,6 +169,29 @@ Deno.serve(async (req) => {
         : error.message;
       return json(400, { error: message });
     }
+    return json(200, { ok: true });
+  }
+
+  if (body.action === 'setPassword') {
+    const userId = String(body.userId || '');
+    const password = String(body.password || '');
+    if (!userId) return json(400, { error: 'Which account?' });
+    if (password.length < 8) {
+      return json(400, { error: 'The password must be at least 8 characters.' });
+    }
+    // Your own goes through Settings, which asks for the current password.
+    // Letting an owner skip that here would make that check pointless for
+    // exactly the accounts it matters most on.
+    if (userId === user.user.id) {
+      return json(400, { error: 'Change your own password in Settings.' });
+    }
+
+    const { error } = await admin.auth.admin.updateUserById(userId, { password });
+    if (error) {
+      console.error('updateUserById failed:', error.message);
+      return json(400, { error: error.message });
+    }
+    console.log(`password set for ${userId}`);
     return json(200, { ok: true });
   }
 

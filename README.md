@@ -5,9 +5,13 @@ off of them, and producing outgoing (sales) invoices as PDFs. Electron on the
 front, Postgres (via Supabase) behind it, so several people can work in the
 same books at once.
 
-Everyone signs in. There are two kinds of account: **owners**, who can create
-and remove accounts and change roles, and **managers**, who can edit
-everything else but cannot touch accounts.
+BookBin opens to a list of databases. Pick one, then sign in to it. Updates
+are offered on that screen, so installing one never needs an account. There
+are two kinds of account: **owners**, who can create and remove accounts,
+change roles and set other people's passwords, and **managers**, who can edit
+everything else but cannot touch accounts. All of that is on the Users page.
+Owners re-enter their own password there before changing anything, and it
+locks again after five minutes.
 
 ## Setup
 
@@ -15,7 +19,9 @@ everything else but cannot touch accounts.
 npm install
 ```
 
-Then create a `.env` in the repo root (copy `.env.example`) with the values
+The `.env` described below is optional. It names the database that a build
+offers on first launch, and every other database is added in the app. To make
+one, create a `.env` in the repo root (copy `.env.example`) with the values
 from your Supabase project under **Settings → API** and **Settings → Data
 API**. `SUPABASE_URL` is the project origin — `https://<ref>.supabase.co` —
 **not** the RESTful endpoint shown beside it, which ends in `/rest/v1` and
@@ -37,7 +43,26 @@ npm start
 
 ## Setting up a Supabase project from scratch
 
-Run these in the SQL Editor, in order:
+The easy way is in the app. Create an empty project at supabase.com, then on
+BookBin's start screen choose **Set up a new one** and paste a personal access
+token (supabase.com → Account → Access Tokens). BookBin then:
+
+- creates the tables,
+- deploys `manage-users`,
+- turns off public sign-ups,
+- creates your owner account,
+- adds the database to the list.
+
+The token is used for that one run and never saved, so delete it afterwards.
+Running setup against a project that already has BookBin's tables leaves the
+tables alone and only updates the function and the sign-up setting. That also
+makes it the simplest way to deploy a newer `manage-users`.
+
+Other computers join with **Add a database**, using the project URL and
+publishable key or a connection code, which is under ⋯ → Connection code on
+any start screen that already has the database.
+
+By hand, run these in the SQL Editor, in order:
 
 1. `supabase/migrations/*.sql` — schema, security policies, and the functions
    that make multi-statement operations atomic.
@@ -102,11 +127,16 @@ business data.
   explainable even after the invoices behind it change.
 - **Purchase Orders** — a wanted list per buying season, showing how much of
   each item has been bought. Closing one freezes those numbers; reopening
-  makes them live again.
+  makes them live again. **Vendor orders** track whole invoices instead, for
+  books somebody else orders and you pay for. Each tracked vendor ships either
+  to the warehouse (the invoice only needs paying) or to you (it needs paying
+  and receiving). Invoices are linked by hand from that vendor's unlinked ones.
 - **Dashboard** — low-stock warnings and the most recent invoices of each kind.
 - **Settings** — company name, address and logo (shown on PDF invoices),
   invoice prefixes and counters, markup percentage, low-stock threshold.
-- **Users** (owners only) — create accounts, change roles, remove accounts.
+- **Users** — everyone changes their own password here. Owners also create
+  accounts, change roles, set passwords and remove accounts, after
+  re-entering their own password.
 
 Invoice attachments and the company logo live in Supabase Storage, so a file
 attached on one machine opens on another.

@@ -70,13 +70,38 @@ async function withSummary(po) {
   return { ...po, line_count: lines.length, total_wanted: totalWanted, total_bought: totalBought };
 }
 
+// For the order list: per PO that tracks any vendor orders, how many of their
+// invoices still need something done -- paying, or for orders shipped here,
+// receiving too. One call for every PO. A PO with no tracked vendors is left
+// out, which the list shows as nothing rather than as "0 to do".
+async function vendorTodoByPo() {
+  const { data, error } = await table('purchase_order_vendors')
+    .select('purchase_order_id, ships_to, purchase_order_invoices(incoming_invoices(paid, received))');
+  if (error) {
+    // Most likely a database without the vendor-orders tables yet. The list
+    // is still worth showing without this column's numbers.
+    console.error('BookBin: could not read vendor orders —', error.message);
+    return new Map();
+  }
+  const counts = new Map();
+  for (const row of data || []) {
+    const open = (row.purchase_order_invoices || [])
+      .map((link) => link.incoming_invoices)
+      .filter(Boolean)
+      .filter((inv) => !inv.paid || (row.ships_to === 'me' && !inv.received)).length;
+    counts.set(row.purchase_order_id, (counts.get(row.purchase_order_id) || 0) + open);
+  }
+  return counts;
+}
+
 function registerPurchaseOrders(ipcMain) {
   ipcMain.handle('purchaseOrders:list', async () => {
     const rows = newestFirst(unwrap(await table('purchase_orders').select(PO_COLUMNS)));
     // Sequential rather than parallel: each summary is itself two calls, and
     // an order list is short enough that fanning out buys nothing.
     const out = [];
-    for (const po of rows) out.push(await withSummary(po));
+    const vendorTodo = await vendorTodoByPo();
+    for (const po of rows) out.push({ ...(await withSummary(po)), vendor_todo: vendorTodo.get(po.id) ?? null });
     return out;
   });
 
@@ -232,4 +257,153 @@ function registerPurchaseOrderItems(ipcMain) {
   });
 }
 
-module.exports = { registerPurchaseOrders, registerPurchaseOrderItems };
+// Vendor orders: whole invoices tracked against a PO, for books somebody else
+// orders and this business pays for. See the purchase_order_vendors migration
+// for why they are linked by hand rather than matched by vendor and date.
+function registerPurchaseOrderVendors(ipcMain) {
+  const INVOICE_COLUMNS = 'id, invoice_number, invoice_date, total, paid, received';
+
+  function coerceInvoice(row) {
+    return {
+      id: row.id,
+      invoice_number: row.invoice_number,
+      invoice_date: row.invoice_date,
+      total: toNumber(row.total) || 0,
+      paid: !!row.paid,
+      received: !!row.received,
+    };
+  }
+
+  async function assertOpenPo(purchaseOrderId) {
+    const po = await getPurchaseOrder(purchaseOrderId);
+    if (!po) throw new Error('That purchase order no longer exists.');
+    if (po.status === 'closed') {
+      throw new Error('This purchase order is closed and cannot be changed — reopen it first.');
+    }
+  }
+
+  async function getEntry(id) {
+    const row = unwrap(
+      await table('purchase_order_vendors')
+        .select('id, purchase_order_id, vendor_id')
+        .eq('id', id)
+        .maybeSingle()
+    );
+    if (!row) throw new Error('That vendor is no longer on this purchase order.');
+    return row;
+  }
+
+  // Each tracked vendor with its linked invoices, oldest invoice first -- the
+  // order they arrived in, which is the order they get dealt with.
+  ipcMain.handle('purchaseOrderVendors:list', async (_e, purchaseOrderId) => {
+    const rows = unwrap(
+      await table('purchase_order_vendors')
+        .select(
+          'id, vendor_id, ships_to, notes, created_at, vendors(name), ' +
+          `purchase_order_invoices(incoming_invoices(${INVOICE_COLUMNS}))`
+        )
+        .eq('purchase_order_id', purchaseOrderId)
+    );
+    return rows
+      .map((row) => ({
+        id: row.id,
+        vendor_id: row.vendor_id,
+        vendor_name: (row.vendors && row.vendors.name) || '(deleted vendor)',
+        ships_to: row.ships_to,
+        notes: row.notes,
+        invoices: (row.purchase_order_invoices || [])
+          .map((link) => link.incoming_invoices)
+          .filter(Boolean)
+          .map(coerceInvoice)
+          .sort(
+            (a, b) => String(a.invoice_date).localeCompare(String(b.invoice_date)) || a.id - b.id
+          ),
+      }))
+      .sort((a, b) => a.vendor_name.localeCompare(b.vendor_name, undefined, { sensitivity: 'base' }));
+  });
+
+  ipcMain.handle('purchaseOrderVendors:create', async (_e, data) => {
+    await assertOpenPo(data.purchase_order_id);
+    const { error } = await table('purchase_order_vendors').insert({
+      purchase_order_id: data.purchase_order_id,
+      vendor_id: data.vendor_id,
+      ships_to: data.ships_to === 'me' ? 'me' : 'warehouse',
+      notes: data.notes || null,
+    });
+    if (error && error.code === '23505') {
+      throw new Error('That vendor is already on this purchase order.');
+    }
+    unwrap({ data: null, error });
+    return { ok: true };
+  });
+
+  ipcMain.handle('purchaseOrderVendors:update', async (_e, id, data) => {
+    const entry = await getEntry(id);
+    await assertOpenPo(entry.purchase_order_id);
+    unwrap(
+      await table('purchase_order_vendors')
+        .update({ ships_to: data.ships_to === 'me' ? 'me' : 'warehouse', notes: data.notes || null })
+        .eq('id', id)
+    );
+    return { ok: true };
+  });
+
+  // Takes its invoice links with it; the invoices themselves are untouched.
+  ipcMain.handle('purchaseOrderVendors:delete', async (_e, id) => {
+    const entry = await getEntry(id);
+    await assertOpenPo(entry.purchase_order_id);
+    unwrap(await table('purchase_order_vendors').delete().eq('id', id));
+    return { ok: true };
+  });
+
+  // Invoices from this vendor that are not on any purchase order yet, newest
+  // first: the likeliest ones to belong are the recent ones.
+  ipcMain.handle('purchaseOrderVendors:candidates', async (_e, id) => {
+    const entry = await getEntry(id);
+    const [invoices, links] = await Promise.all([
+      table('incoming_invoices').select(INVOICE_COLUMNS).eq('vendor_id', entry.vendor_id),
+      table('purchase_order_invoices').select('invoice_id'),
+    ]);
+    const linked = new Set(unwrap(links).map((l) => l.invoice_id));
+    return unwrap(invoices)
+      .filter((inv) => !linked.has(inv.id))
+      .map(coerceInvoice)
+      .sort((a, b) => String(b.invoice_date).localeCompare(String(a.invoice_date)) || b.id - a.id);
+  });
+
+  ipcMain.handle('purchaseOrderVendors:link', async (_e, id, invoiceIds) => {
+    const entry = await getEntry(id);
+    await assertOpenPo(entry.purchase_order_id);
+    const ids = [...new Set((invoiceIds || []).map(Number).filter(Boolean))];
+    if (!ids.length) return { ok: true };
+    const { error } = await table('purchase_order_invoices').insert(
+      ids.map((invoiceId) => ({ invoice_id: invoiceId, purchase_order_vendor_id: id }))
+    );
+    // Somebody else linked one of them in the meantime. The insert is one
+    // statement, so none of this batch went in.
+    if (error && error.code === '23505') {
+      throw new Error(
+        'One of those invoices has just been put on a purchase order by someone else. ' +
+        'Nothing was linked; try again.'
+      );
+    }
+    unwrap({ data: null, error });
+    return { ok: true };
+  });
+
+  ipcMain.handle('purchaseOrderVendors:unlink', async (_e, invoiceId) => {
+    const link = unwrap(
+      await table('purchase_order_invoices')
+        .select('purchase_order_vendor_id')
+        .eq('invoice_id', invoiceId)
+        .maybeSingle()
+    );
+    if (!link) return { ok: true };
+    const entry = await getEntry(link.purchase_order_vendor_id);
+    await assertOpenPo(entry.purchase_order_id);
+    unwrap(await table('purchase_order_invoices').delete().eq('invoice_id', invoiceId));
+    return { ok: true };
+  });
+}
+
+module.exports = { registerPurchaseOrders, registerPurchaseOrderItems, registerPurchaseOrderVendors };

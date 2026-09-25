@@ -352,6 +352,46 @@ td.actions { text-align: right; }
 tr.po-row-none, tr.po-notes-row.po-row-none { background: #fef2f2; }
 tr.po-row-partial, tr.po-notes-row.po-row-partial { background: #fffbeb; }
 tr.po-row-full, tr.po-notes-row.po-row-full { background: #f0fdf4; }
+
+/* Vendor orders: whole invoices tracked on a PO, grouped by vendor. */
+.vendor-order { padding: 12px 0; border-top: 1px solid var(--border); }
+.vendor-order:first-of-type { border-top: none; padding-top: 0; }
+.vendor-order-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.vendor-order-header .badge { margin: 0 6px; }
+.vendor-order-notes { margin: 0 0 8px; font-style: italic; }
+.vendor-order-total td { font-weight: 600; border-bottom: none; }
+.badge.ships-me { background: #fef3c7; color: #b45309; }
+.badge.ships-warehouse { background: #e0e7ff; color: #4338ca; }
+
+.radio-group { border: none; padding: 0; margin: 0 0 12px; }
+.radio-group legend { font-size: 12px; color: var(--muted); margin-bottom: 6px; padding: 0; }
+.radio-group label.checkbox { margin-bottom: 6px; color: var(--text); font-size: 13px; }
+
+.link-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+form label.checkbox.link-row {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+form label.checkbox.link-row:last-child { border-bottom: none; }
+.link-row .link-number { font-weight: 600; min-width: 90px; }
+.link-row .num { margin-left: auto; }
 .po-expand-cell { width: 1%; white-space: nowrap; }
 .expand-toggle {
   border: none;
@@ -538,17 +578,23 @@ option.new-entry { color: var(--primary); font-style: italic; }
 
 body.signed-out #login-root {
   display: flex;
-  align-items: center;
-  justify-content: center;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 16px;
   background: var(--bg);
 }
 
 body.signed-out #shell,
 body.signed-out #banner-root { display: none; }
 
+/* margin: auto rather than centring the parent: it centres when the card
+   fits, and lets it scroll from the top when a setup step is taller than the
+   window, instead of cutting its first lines off. */
 .login-card {
   width: 320px;
+  max-width: 100%;
+  margin: auto;
   padding: 28px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -625,6 +671,151 @@ body.signed-out #banner-root { display: none; }
 
 .login-submit:hover:not(:disabled) { background: var(--primary-dark); }
 .login-submit:disabled { opacity: 0.6; cursor: default; }
+
+/* ------------------------------------------------------- the start screen */
+
+.login-card.launcher-wide { width: 420px; }
+.login-card .muted.small { font-size: 12px; line-height: 1.5; }
+.launcher-empty { text-align: center; margin: 8px 0 16px; }
+
+.db-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.db-item {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.db-item.last-used { border-color: var(--primary); }
+
+.db-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  text-align: left;
+  font-family: inherit;
+  background: var(--panel);
+  border: none;
+  cursor: pointer;
+}
+
+.db-open:hover:not(:disabled) { background: var(--bg); }
+.db-open:disabled { cursor: default; opacity: 0.6; }
+.db-open.opening { opacity: 1; background: var(--bg); }
+.db-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.db-host {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-menu {
+  width: 40px;
+  font-size: 16px;
+  color: var(--muted);
+  background: var(--panel);
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.db-menu:hover { background: var(--bg); color: var(--text); }
+
+.launcher-actions { display: flex; gap: 8px; }
+.launcher-actions .btn { flex: 1; }
+
+.launcher-links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.launcher-links a, .setup-steps a { color: var(--primary); }
+
+.setup-steps {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.setup-steps li + li { margin-top: 6px; }
+
+.code-box {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  resize: vertical;
+}
+
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+/* The update controls, restyled for the light card: in the sidebar they sit
+   on a dark background. */
+.launcher-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.launcher-footer .app-version { color: var(--muted); opacity: 1; }
+.launcher-footer .update-row { color: var(--muted); }
+.launcher-footer .update-row.clickable:hover { color: var(--primary); }
+.launcher-footer .update-row.error { color: var(--danger); }
+.launcher-footer .update-btn {
+  color: var(--text);
+  border-color: var(--border);
+}
+.launcher-footer .update-btn:hover { background: var(--bg); color: var(--text); }
+.launcher-footer .update-btn.primary { color: #fff; }
+
+/* ------------------------------------------------ owner unlock, Users page */
+
+.lock-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 13px;
+}
+
+.lock-bar.unlocked { border-color: #86efac; background: #f0fdf4; }
+.lock-bar form { display: flex; gap: 8px; align-items: center; margin: 0; }
+.lock-bar input { width: 200px; margin: 0; }
+.lock-bar .lock-text { flex: 1; min-width: 180px; }
 
 /* ------------------------------------------------- signed-in user, sidebar */
 

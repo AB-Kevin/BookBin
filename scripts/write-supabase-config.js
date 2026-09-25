@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Bakes the Supabase URL and anon key into the app at package time.
+// Bakes the Supabase URL and anon key into the app at package time, as the
+// database offered on first launch. Others can be added in the app.
 //
 // A packaged build has no .env beside it and no environment variables set, so
 // the values have to be written to a file that electron-builder bundles. This
@@ -15,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { normalizeUrl } = require('../config/supabase');
+const { normalizeUrl, looksLikeSecretKey } = require('../config/supabase');
 
 const ROOT = path.join(__dirname, '..');
 const OUT_FILE = path.join(ROOT, 'config', 'supabase.generated.json');
@@ -41,21 +42,6 @@ function readEnvFile() {
     if (key) values[key] = value;
   }
   return values;
-}
-
-// Supabase has issued keys in two shapes: the newer sb_publishable_ /
-// sb_secret_ prefixes, and older JWTs carrying a "role" claim. Check both.
-function looksLikeServiceKey(key) {
-  if (key.startsWith('sb_secret_')) return true;
-
-  const parts = key.split('.');
-  if (parts.length !== 3) return false;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-    return payload.role === 'service_role';
-  } catch (err) {
-    return false;
-  }
 }
 
 function fail(message) {
@@ -84,7 +70,7 @@ if (!url || !publishableKey) {
   );
 }
 
-if (looksLikeServiceKey(publishableKey)) {
+if (looksLikeSecretKey(publishableKey)) {
   fail(
     'Refusing to build: that key looks like a secret / service_role key.\n' +
     '  That key ignores row-level security, and packaging it would give\n' +

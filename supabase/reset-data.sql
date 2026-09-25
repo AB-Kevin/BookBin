@@ -27,6 +27,8 @@ truncate
   public.outgoing_invoice_lines,
   public.inventory_adjustments,
   public.item_cost_snapshots,
+  public.purchase_order_invoices,
+  public.purchase_order_vendors,
   public.purchase_order_items,
   public.incoming_invoices,
   public.outgoing_invoices,

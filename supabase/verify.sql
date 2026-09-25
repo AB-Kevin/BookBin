@@ -21,12 +21,17 @@ from (
     end as status
   from pg_tables t
   where t.schemaname = 'public'
+    -- The app's own bookkeeping, written only by setup through the Management
+    -- API. Locked to everybody on purpose, which is what a missing policy means.
+    and t.tablename <> 'bookbin_migrations'
 
   union all
-  select 2, 'Table count', 'expected 13',
-    case when (select count(*) from pg_tables where schemaname = 'public') = 13
+  select 2, 'Table count', 'expected 15',
+    case when (select count(*) from pg_tables
+                where schemaname = 'public' and tablename <> 'bookbin_migrations') = 15
       then 'PASS'
-      else 'FAIL - found ' || (select count(*) from pg_tables where schemaname = 'public')::text
+      else 'FAIL - found ' || (select count(*) from pg_tables
+                                where schemaname = 'public' and tablename <> 'bookbin_migrations')::text
     end
 
   union all

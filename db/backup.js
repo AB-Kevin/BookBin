@@ -28,7 +28,15 @@ const TABLES = [
   'item_cost_snapshots',
   'purchase_orders',
   'purchase_order_items',
+  'purchase_order_vendors',
+  'purchase_order_invoices',
 ];
+
+// Paging needs a stable order, which means a unique column. Most tables have
+// an id; a link table is keyed by what it links.
+const ORDER_COLUMN = {
+  purchase_order_invoices: 'invoice_id',
+};
 
 // PostgREST caps a response at 1000 rows and says nothing about it: ask for a
 // table with more and you get the first 1000 as though that were all of them.
@@ -43,7 +51,7 @@ async function fetchAll(tableName) {
   const rows = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const page = unwrap(
-      await table(tableName).select('*').order('id', { ascending: true }).range(from, from + PAGE_SIZE - 1)
+      await table(tableName).select('*').order(ORDER_COLUMN[tableName] || 'id', { ascending: true }).range(from, from + PAGE_SIZE - 1)
     );
     rows.push(...page);
     if (page.length < PAGE_SIZE) return rows;
@@ -58,9 +66,22 @@ function stamp(date) {
   ].join('');
 }
 
-function existingBackups(dir) {
+// Each database's files carry its tag, so two databases backing up into the
+// same folder each keep their own last 14 rather than pruning each other's.
+// The untagged name is the one used before there was more than one database,
+// and matches only a bare timestamp -- never another database's tagged files.
+function prefixFor(tag) {
+  return tag ? `bookbin-backup-${tag}-` : 'bookbin-backup-';
+}
+
+function existingBackups(dir, tag) {
+  const prefix = prefixFor(tag);
+  const stampPattern = /^\d{4}-\d{2}-\d{2}-\d{4}\.json$/;
   try {
-    return fs.readdirSync(dir).filter((f) => /^bookbin-backup-.+\.json$/.test(f)).sort();
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith(prefix) && stampPattern.test(f.slice(prefix.length)))
+      .sort();
   } catch (err) {
     return [];
   }
@@ -72,7 +93,7 @@ function existingBackups(dir) {
  * failure should be reported, not allowed to interrupt whatever the person
  * was doing.
  */
-async function runBackup(dir) {
+async function runBackup(dir, tag = '') {
   if (!dir) return { ok: false, error: 'No backup folder is set.' };
 
   try {
@@ -87,7 +108,7 @@ async function runBackup(dir) {
       rowCount += data[name].length;
     }
 
-    const target = path.join(dir, `bookbin-backup-${stamp(new Date())}.json`);
+    const target = path.join(dir, `${prefixFor(tag)}${stamp(new Date())}.json`);
     const contents = {
       generatedAt: new Date().toISOString(),
       note: 'BookBin data backup. Table rows exactly as stored; numeric columns are strings.',
@@ -100,7 +121,7 @@ async function runBackup(dir) {
     fs.writeFileSync(temp, JSON.stringify(contents, null, 2), 'utf8');
     fs.renameSync(temp, target);
 
-    const remaining = existingBackups(dir);
+    const remaining = existingBackups(dir, tag);
     for (const name of remaining.slice(0, Math.max(0, remaining.length - KEEP))) {
       fs.rmSync(path.join(dir, name), { force: true });
     }

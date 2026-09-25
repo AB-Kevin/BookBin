@@ -1,5 +1,9 @@
 // The Supabase client, and where the signed-in session is kept.
 //
+// Which database is open is decided at runtime: the person picks one from the
+// list in config/databases.js before signing in. Until they do there is no
+// client, and anything that asks for one is told so.
+//
 // The client lives in the main process only. The renderer reaches the database
 // the way it always has -- through IPC -- so switching the storage engine does
 // not hand the renderer a network client, and the access token never enters a
@@ -14,11 +18,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app, net, safeStorage } = require('electron');
+const { net, safeStorage } = require('electron');
 const { createClient } = require('@supabase/supabase-js');
-const { getSupabaseConfig } = require('../config/supabase');
-
-const SESSION_FILE = 'session.bin';
+const databases = require('../config/databases');
 
 /**
  * A localStorage-shaped adapter over one encrypted file.
@@ -75,17 +77,54 @@ function createSecureStorage(filePath) {
 }
 
 let client = null;
+let current = null;
 let encryptionWarned = false;
 
+/** The open database's list entry, or null when none is open. */
+function getCurrentDatabase() {
+  return current ? { ...current } : null;
+}
+
 /**
- * Returns the shared client, creating it on first use. Throws with a readable
- * message if the app was built or run without its configuration.
+ * Makes `id` the open database. The previous client is dropped, not signed
+ * out: its saved session stays in its own file, so switching back later does
+ * not ask for the password again.
+ */
+function openDatabase(id) {
+  const entry = databases.get(id);
+  if (!entry) throw new Error('That database is no longer in the list.');
+  closeDatabase();
+  current = entry;
+  databases.setLastUsed(id);
+  return getCurrentDatabase();
+}
+
+function closeDatabase() {
+  if (client) {
+    // Stops the refresh timer; without this the old client keeps renewing a
+    // session nobody is using, against a database nobody has open.
+    try {
+      client.auth.stopAutoRefresh();
+    } catch (err) {
+      // Older clients have no such method; dropping the reference is enough.
+    }
+  }
+  client = null;
+  current = null;
+}
+
+/**
+ * Returns the open database's client, creating it on first use. Throws when
+ * no database is open -- a caller reaching this without one is a bug in the
+ * flow, and a clear message beats a request to nowhere.
  */
 function getSupabase() {
   if (client) return client;
+  if (!current) throw new Error('No database is open. Choose one first.');
 
-  const { url, publishableKey } = getSupabaseConfig();
-  const sessionPath = path.join(app.getPath('userData'), SESSION_FILE);
+  const { url, publishableKey } = current;
+  const sessionPath = databases.sessionFileFor(current.id);
+  fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
 
   if (!safeStorage.isEncryptionAvailable() && !encryptionWarned) {
     encryptionWarned = true;
@@ -115,13 +154,38 @@ function getSupabase() {
   return client;
 }
 
-/** Deletes the stored session outright. Used on sign-out. */
+/**
+ * A throwaway client for checking a password, which never touches the open
+ * session. Signing in on the real client would do the same check, but would
+ * also replace the session -- harmless when it is the same person, and a
+ * silent account switch if it were ever not.
+ */
+function createScratchClient() {
+  if (!current) throw new Error('No database is open. Choose one first.');
+  return createClient(current.url, current.publishableKey, {
+    global: { fetch: (...args) => net.fetch(...args) },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
+/** Deletes the open database's stored session outright. Used on sign-out. */
 function clearStoredSession() {
+  if (!current) return;
   try {
-    fs.rmSync(path.join(app.getPath('userData'), SESSION_FILE), { force: true });
+    fs.rmSync(databases.sessionFileFor(current.id), { force: true });
   } catch (err) {
     console.error('BookBin: could not clear session —', err.message);
   }
+  // The client caches the session in memory too; a fresh one starts clean.
+  client = null;
 }
 
-module.exports = { getSupabase, clearStoredSession, createSecureStorage };
+module.exports = {
+  getSupabase,
+  getCurrentDatabase,
+  openDatabase,
+  closeDatabase,
+  createScratchClient,
+  clearStoredSession,
+  createSecureStorage,
+};

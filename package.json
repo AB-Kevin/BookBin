@@ -33,6 +33,8 @@
       "db/**/*",
       "ipc/**/*",
       "renderer/**/*",
+      "supabase/migrations/**/*",
+      "supabase/functions/**/*",
       "build/BookBin-512.png"
     ],
     "win": {

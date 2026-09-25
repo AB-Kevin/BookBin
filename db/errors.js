@@ -11,12 +11,14 @@
 //                      problem is at the other end
 //   no reply        -- could be either, so say so rather than guessing
 
-// A build pointed at the wrong address fails on the first request with a
-// PostgREST routing error, which names a code and a path and nothing a person
-// can act on. Saying which address was baked in turns it into a fixable fact.
+// A database entry pointed at the wrong address fails on the first request
+// with a PostgREST routing error, which names a code and a path and nothing a
+// person can act on. Saying which address is in use turns it into a fixable
+// fact.
 function configuredUrl() {
   try {
-    return require('../config/supabase').getSupabaseConfig().url;
+    const db = require('./supabase').getCurrentDatabase();
+    return db && db.url;
   } catch (err) {
     return null;
   }
@@ -26,8 +28,8 @@ function wrongAddressMessage() {
   const url = configuredUrl();
   return (
     'BookBin is pointed at the wrong address' + (url ? ` (${url})` : '') + '. ' +
-    'The SUPABASE_URL it was built with should be just the project origin, ' +
-    'with no /rest/v1 or other path on the end.'
+    'The address should be just the project origin, with no /rest/v1 or ' +
+    'other path on the end. Remove the database from the list and add it again.'
   );
 }
 

@@ -1,4 +1,4 @@
-// Resolves the Supabase project URL and anon key.
+// The Supabase project URL and anon key this build was made with, if any.
 //
 // These are not secret in the cryptographic sense -- the anon key is designed
 // to be held by clients, and it necessarily ships inside the packaged app
@@ -17,6 +17,9 @@
 //
 // A packaged build has no .env and no environment, which is exactly why step
 // 3 exists; a dev run has no generated file, which is why steps 1 and 2 do.
+//
+// Whatever is found here seeds the database list on first launch and nothing
+// more: see config/databases.js.
 //
 // SUPABASE_PUBLISHABLE_KEY is the current name; SUPABASE_ANON_KEY is accepted
 // as an alias because Supabase is mid-migration from the legacy anon JWT to
@@ -90,16 +93,35 @@ function readGeneratedFile(file) {
   }
 }
 
-let cached = null;
+// Supabase has issued keys in two shapes: the newer sb_publishable_ /
+// sb_secret_ prefixes, and older JWTs carrying a "role" claim. Check both.
+// A secret key ignores every row-level security policy, so it must never be
+// saved on a machine or baked into a build -- and it sits directly below the
+// publishable key on the dashboard, which makes it an easy one to grab.
+function looksLikeSecretKey(key) {
+  const value = String(key || '').trim();
+  if (value.startsWith('sb_secret_')) return true;
+
+  const parts = value.split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    return payload.role === 'service_role';
+  } catch (err) {
+    return false;
+  }
+}
 
 /**
- * Returns { url, publishableKey }, or throws with an explanation of how to fix it.
- * Throwing beats returning nulls here: a missing key surfaces at startup as
- * one clear message rather than as a confusing auth failure later on.
+ * The database this build was made for, as { url, publishableKey }, or null
+ * when there is none.
+ *
+ * It is no longer the only database the app can use -- just the one offered
+ * on first launch, so an existing install keeps working without anybody
+ * typing an address. A build without one is perfectly usable; the database
+ * list simply starts empty.
  */
-function getSupabaseConfig() {
-  if (cached) return cached;
-
+function getBuiltInConfig() {
   const fromEnvFile = readEnvFile(ENV_FILE);
   const fromGenerated = readGeneratedFile(GENERATED_FILE);
 
@@ -112,20 +134,8 @@ function getSupabaseConfig() {
     pick('SUPABASE_ANON_KEY') ||
     fromGenerated.publishableKey || '';
 
-  if (!url || !publishableKey) {
-    const missing = [!url && 'SUPABASE_URL', !publishableKey && 'SUPABASE_PUBLISHABLE_KEY']
-      .filter(Boolean)
-      .join(' and ');
-    throw new Error(
-      `BookBin is not configured: ${missing} missing.\n` +
-      'For development, copy .env.example to .env and fill in the values from\n' +
-      'your Supabase dashboard (Settings -> API). For a packaged build, set the\n' +
-      'same variables in the environment before running npm run dist.'
-    );
-  }
-
-  cached = { url, publishableKey };
-  return cached;
+  if (!url || !publishableKey || looksLikeSecretKey(publishableKey)) return null;
+  return { url, publishableKey };
 }
 
-module.exports = { getSupabaseConfig, normalizeUrl, GENERATED_FILE };
+module.exports = { getBuiltInConfig, normalizeUrl, looksLikeSecretKey, GENERATED_FILE };
