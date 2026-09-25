@@ -5,9 +5,7 @@
 // and for the PDF template, both of which need a real file:// URL.
 
 const { dialog, BrowserWindow } = require('electron');
-const fs = require('fs');
 const path = require('path');
-const { logoDir } = require('../workspace');
 const storage = require('../db/storage');
 const { table, unwrap, numericColumns } = require('../db/rest');
 
@@ -46,14 +44,12 @@ function writableFields(data) {
 
 // Turns whatever company_logo_path holds into an absolute local path.
 //
-// Three shapes appear: a storage object (downloaded and cached), a bare
-// filename in the workspace logo folder, and an absolute path from before
-// workspaces existed. Only the first is written now; the other two are read so
-// that settings saved before the upload keep showing their logo.
+// A storage object is downloaded and cached; an absolute path from before any
+// of this is used as-is. Only the first is written now.
 //
 // Returns null rather than throwing if the object cannot be fetched: a logo
 // that will not download should not stop the settings screen from opening.
-async function resolveLogoPath(storedPath, workspaceDir) {
+async function resolveLogoPath(storedPath) {
   if (!storedPath) return null;
   if (storage.isStoragePath(storedPath)) {
     try {
@@ -63,20 +59,20 @@ async function resolveLogoPath(storedPath, workspaceDir) {
       return null;
     }
   }
-  return path.isAbsolute(storedPath) ? storedPath : path.join(logoDir(workspaceDir), storedPath);
+  return path.isAbsolute(storedPath) ? storedPath : null;
 }
 
 /** Used by the PDF export, which needs a real path for its file:// src. */
-async function resolveCompanyLogo(company, workspaceDir) {
+async function resolveCompanyLogo(company) {
   if (!company || !company.company_logo_path) return company;
-  return { ...company, company_logo_path: await resolveLogoPath(company.company_logo_path, workspaceDir) };
+  return { ...company, company_logo_path: await resolveLogoPath(company.company_logo_path) };
 }
 
-function registerSettings(ipcMain, workspaceDir) {
+function registerSettings(ipcMain) {
   async function withLogoUrl(row) {
     if (!row) return row;
     const settings = coerceSettings(row);
-    const absPath = await resolveLogoPath(settings.company_logo_path, workspaceDir);
+    const absPath = await resolveLogoPath(settings.company_logo_path);
     if (!absPath) return { ...settings, company_logo_url: null };
     return { ...settings, company_logo_url: `file://${absPath.replace(/\\/g, '/')}` };
   }
@@ -121,19 +117,10 @@ function registerSettings(ipcMain, workspaceDir) {
   });
 
   // Best-effort: an orphaned logo costs a few kilobytes, while failing the
-  // whole operation over it costs the user their change.
+  // whole operation over it costs the user their change. A legacy file on
+  // someone's disk is left alone -- not ours to delete.
   async function removeStoredLogo(storedPath) {
-    if (!storedPath) return;
-    if (storage.isStoragePath(storedPath)) {
-      await storage.removeFile(storedPath);
-      return;
-    }
-    if (path.isAbsolute(storedPath)) return; // predates workspaces; not ours to delete
-    try {
-      fs.rmSync(path.join(logoDir(workspaceDir), storedPath), { force: true });
-    } catch (err) {
-      console.error('BookBin: could not remove the old logo —', err.message);
-    }
+    if (storedPath && storage.isStoragePath(storedPath)) await storage.removeFile(storedPath);
   }
 }
 

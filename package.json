@@ -29,7 +29,6 @@
     "files": [
       "main.js",
       "preload.js",
-      "workspace.js",
       "config/**/*",
       "db/**/*",
       "ipc/**/*",

@@ -26,8 +26,8 @@ const LINE_COLUMNS = 'id, invoice_id, item_id, description, quantity, unit_cost,
 const coerceInvoice = numericColumns('total', 'shipping_tax');
 const coerceLine = numericColumns('quantity', 'unit_cost', 'line_total');
 
-module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
-  const attachments = createAttachments('incoming', workspaceDir);
+module.exports = function registerIncomingInvoices(ipcMain) {
+  const attachments = createAttachments('incoming');
 
   // The SQLite list flattened the vendor join and rolled the line descriptions
   // into one GROUP_CONCAT string. PostgREST returns them nested instead, so

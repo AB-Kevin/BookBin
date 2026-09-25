@@ -4,12 +4,13 @@
 // column, and telling them apart is what lets old rows keep working:
 //
 //   "incoming/6f3a....pdf"   a storage object -- contains a slash
-//   "6f3a....pdf"            a legacy local file in the workspace folder
-//   "C:\\...\\logo.png"      a legacy absolute path, older still
+//   "C:\\...\\logo.png"      a legacy absolute path, from before all this
 //
-// Only the first is produced now. The others are read, never written, so a
-// database migrated before the files were uploaded still opens its
-// attachments from disk rather than failing.
+// Only the first is produced now. An absolute path is still opened from disk,
+// since it says exactly where the file is. A bare filename used to mean "in
+// the workspace folder"; that folder no longer exists, so such a value names
+// a file that was never uploaded, and the caller says so rather than silently
+// opening nothing.
 //
 // Every uploaded object gets a fresh UUID name. That is not decoration: files
 // are cached locally after download, and a name that is never reused means a
@@ -85,8 +86,8 @@ async function uploadBuffer(folder, buffer, extension) {
 }
 
 /**
- * Deletes an object. Does nothing for legacy local paths -- those are removed
- * by the caller, which knows which workspace folder they live in.
+ * Deletes an object. Does nothing for a legacy local path: a file sitting on
+ * someone's disk is not ours to remove, and nothing references it any more.
  *
  * A failure here is logged, not thrown: an orphaned object costs a few
  * kilobytes, while refusing to save an invoice because its old attachment

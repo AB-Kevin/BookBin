@@ -30,8 +30,8 @@ const LINE_COLUMNS = 'id, invoice_id, item_id, description, quantity, unit_price
 const coerceInvoice = numericColumns('total');
 const coerceLine = numericColumns('quantity', 'unit_price', 'line_total');
 
-module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
-  const attachments = createAttachments('outgoing', workspaceDir);
+module.exports = function registerOutgoingInvoices(ipcMain) {
+  const attachments = createAttachments('outgoing');
 
   async function getFullInvoice(id) {
     const row = unwrap(
@@ -159,7 +159,7 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
     if (!invoice) throw new Error('Invoice not found');
 
     const settings = unwrap(await table('settings').select('*').eq('id', 1).single());
-    const company = await resolveCompanyLogo(settings, workspaceDir);
+    const company = await resolveCompanyLogo(settings);
     const html = buildInvoiceHtml({ invoice, company });
 
     const tempPath = path.join(os.tmpdir(), `bookbin-invoice-${id}-${Date.now()}.html`);

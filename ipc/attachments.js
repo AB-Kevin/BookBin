@@ -5,36 +5,21 @@
 // same time, so an attachment added on one machine opens on another -- which
 // local files in a synced folder never managed once the database went online.
 //
-// Legacy paths are still read. A row written before the upload names a bare
-// filename in the workspace folder, and opening it still works; only new
-// attachments become storage objects.
+// Legacy absolute paths are still opened from disk. A bare filename, which
+// used to mean "in the workspace folder", can no longer be located: that
+// folder is gone, so such a row names a file that was never uploaded.
 
-const fs = require('fs');
 const path = require('path');
 const { shell } = require('electron');
-const { attachmentsDir } = require('../workspace');
 const storage = require('../db/storage');
 
-module.exports = function createAttachments(kind, workspaceDir) {
-  const localDir = attachmentsDir(workspaceDir, kind);
-
-  function localPathFor(storedPath) {
-    return path.isAbsolute(storedPath) ? storedPath : path.join(localDir, storedPath);
-  }
-
-  // Tidying up an old file must never be the reason a save fails, so every
-  // removal here is best-effort.
+module.exports = function createAttachments(kind) {
+  // Tidying up an old file must never be the reason a save fails, so this is
+  // best-effort. A legacy file on someone's disk is deliberately left alone:
+  // it is not ours to delete, and it is no longer referenced either way.
   async function remove(storedPath) {
     if (!storedPath) return;
-    if (storage.isStoragePath(storedPath)) {
-      await storage.removeFile(storedPath);
-      return;
-    }
-    try {
-      fs.rmSync(localPathFor(storedPath), { force: true });
-    } catch (err) {
-      console.error('BookBin: could not remove old attachment —', err.message);
-    }
+    if (storage.isStoragePath(storedPath)) await storage.removeFile(storedPath);
   }
 
   /**
@@ -77,9 +62,12 @@ module.exports = function createAttachments(kind, workspaceDir) {
   /** Opens an attachment in whatever the OS uses for that file type. */
   async function open(storedPath) {
     if (!storedPath) return { ok: false };
+    if (!storage.isStoragePath(storedPath) && !path.isAbsolute(storedPath)) {
+      return { ok: false, error: 'This attachment was never uploaded and cannot be opened.' };
+    }
     const absPath = storage.isStoragePath(storedPath)
       ? await storage.ensureLocalCopy(storedPath)
-      : localPathFor(storedPath);
+      : storedPath;
     const err = await shell.openPath(absPath);
     return { ok: !err, error: err || null };
   }
