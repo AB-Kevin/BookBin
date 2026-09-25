@@ -27,6 +27,30 @@ const fs = require('fs');
 const path = require('path');
 
 const GENERATED_FILE = path.join(__dirname, 'supabase.generated.json');
+
+/**
+ * Reduces whatever was supplied to the project's origin.
+ *
+ * The Supabase dashboard shows several addresses on one page, and the REST
+ * endpoint -- https://<ref>.supabase.co/rest/v1 -- looks like as plausible a
+ * "project URL" as the bare origin does. Supplying it makes every request go
+ * to /rest/v1/auth/v1/... and the app fails at the login screen with
+ * "Invalid path specified in request URL", which says nothing about the cause.
+ *
+ * Dropping the path here means any of those addresses works.
+ */
+function normalizeUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  try {
+    return new URL(trimmed).origin;
+  } catch (err) {
+    // Not a parseable URL at all; leave it to the caller's validation, minus
+    // any trailing slashes.
+    return trimmed.replace(/\/+$/, '');
+  }
+}
+
 const ENV_FILE = path.join(__dirname, '..', '.env');
 
 // Small hand-rolled parser rather than a dotenv dependency: the file has at
@@ -82,7 +106,7 @@ function getSupabaseConfig() {
   const pick = (name) =>
     process.env[name] || fromEnvFile[name] || '';
 
-  const url = pick('SUPABASE_URL') || fromGenerated.url || '';
+  const url = normalizeUrl(pick('SUPABASE_URL') || fromGenerated.url || '');
   const publishableKey =
     pick('SUPABASE_PUBLISHABLE_KEY') ||
     pick('SUPABASE_ANON_KEY') ||
@@ -104,4 +128,4 @@ function getSupabaseConfig() {
   return cached;
 }
 
-module.exports = { getSupabaseConfig, GENERATED_FILE };
+module.exports = { getSupabaseConfig, normalizeUrl, GENERATED_FILE };

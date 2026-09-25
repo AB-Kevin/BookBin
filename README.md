@@ -17,7 +17,9 @@ npm install
 
 Then create a `.env` in the repo root (copy `.env.example`) with the values
 from your Supabase project under **Settings → API** and **Settings → Data
-API**:
+API**. `SUPABASE_URL` is the project origin — `https://<ref>.supabase.co` —
+**not** the RESTful endpoint shown beside it, which ends in `/rest/v1` and
+sends every request down a wrong path:
 
 ```
 SUPABASE_URL=https://your-project-ref.supabase.co
@@ -134,8 +136,13 @@ publishes both to the GitHub Release for that tag — no local Mac needed.
 
 **The build needs the Supabase values as repository secrets**
 (Settings → Secrets and variables → Actions): `SUPABASE_URL` and
-`SUPABASE_PUBLISHABLE_KEY`. Without them the build fails with a clear message
-rather than shipping an app that cannot connect.
+`SUPABASE_PUBLISHABLE_KEY`. Repository secrets, not environment secrets — the
+workflow declares no environment, so an environment secret would arrive empty.
+Without them the build fails with a clear message rather than shipping an app
+that cannot connect.
+
+`SUPABASE_URL` must be the project origin. A path on the end is reduced to
+the origin at build time, with a warning in the build log.
 
 The sidebar footer shows the installed version and checks that release feed on
 launch. On Windows it installs the update in place; on Mac — only ad-hoc

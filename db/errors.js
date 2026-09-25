@@ -11,6 +11,26 @@
 //                      problem is at the other end
 //   no reply        -- could be either, so say so rather than guessing
 
+// A build pointed at the wrong address fails on the first request with a
+// PostgREST routing error, which names a code and a path and nothing a person
+// can act on. Saying which address was baked in turns it into a fixable fact.
+function configuredUrl() {
+  try {
+    return require('../config/supabase').getSupabaseConfig().url;
+  } catch (err) {
+    return null;
+  }
+}
+
+function wrongAddressMessage() {
+  const url = configuredUrl();
+  return (
+    'BookBin is pointed at the wrong address' + (url ? ` (${url})` : '') + '. ' +
+    'The SUPABASE_URL it was built with should be just the project origin, ' +
+    'with no /rest/v1 or other path on the end.'
+  );
+}
+
 const PAUSED =
   'The BookBin database is paused. Free Supabase projects pause after about ' +
   'a week without use — an owner can resume it from the Supabase dashboard.';
@@ -43,6 +63,13 @@ function isNetworkFailure(message) {
 function describeConnectionFailure(error) {
   const status = statusOf(error);
   const message = String((error && error.message) || error || '');
+  const code = (error && error.code) || '';
+
+  // PGRST125 is PostgREST saying the path it was handed is not one of its
+  // routes -- in practice, a URL with an extra path segment baked in.
+  if (code === 'PGRST125' || /invalid path specified in request url/i.test(message)) {
+    return wrongAddressMessage();
+  }
 
   // Supabase answers for a paused project at the gateway rather than the
   // database, so the exact code has moved about between 503, 540 and 544.
@@ -58,4 +85,11 @@ function describeConnectionFailure(error) {
   return null;
 }
 
-module.exports = { describeConnectionFailure, isNetworkFailure, PAUSED, SERVER_ERROR, UNREACHABLE };
+module.exports = {
+  describeConnectionFailure,
+  isNetworkFailure,
+  wrongAddressMessage,
+  PAUSED,
+  SERVER_ERROR,
+  UNREACHABLE,
+};

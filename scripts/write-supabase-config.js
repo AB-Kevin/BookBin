@@ -15,6 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const { normalizeUrl } = require('../config/supabase');
+
 const ROOT = path.join(__dirname, '..');
 const OUT_FILE = path.join(ROOT, 'config', 'supabase.generated.json');
 
@@ -64,7 +66,8 @@ function fail(message) {
 const env = readEnvFile();
 const pick = (name) => process.env[name] || env[name] || '';
 
-const url = pick('SUPABASE_URL');
+const rawUrl = pick('SUPABASE_URL');
+const url = normalizeUrl(rawUrl);
 // Either name works: Supabase is mid-migration from the legacy anon JWT to
 // sb_publishable_ keys, and which one appears on the dashboard depends on how
 // old the project is.
@@ -90,8 +93,23 @@ if (looksLikeServiceKey(publishableKey)) {
   );
 }
 
-if (!/^https:\/\/[a-z0-9-]+\.supabase\./i.test(url)) {
-  fail(`Refusing to build: SUPABASE_URL does not look like a Supabase URL:\n  ${url}`);
+// Anchored at both ends: the old pattern checked only the start, so the REST
+// endpoint from the dashboard passed validation and shipped an app that could
+// not sign in. normalizeUrl has already dropped any path by this point, so
+// this now only rejects an address that is not a Supabase project at all.
+if (!/^https:\/\/[a-z0-9-]+\.supabase\.[a-z.]+$/i.test(url)) {
+  fail(`Refusing to build: SUPABASE_URL does not look like a Supabase project URL:\n  ${rawUrl}`);
+}
+
+// Loud, but not fatal: the value works once the path is dropped, and a build
+// that fails here is a release somebody has to run twice.
+if (String(rawUrl).trim() !== url) {
+  console.warn(
+    `\n  Note: SUPABASE_URL was given as\n    ${String(rawUrl).trim()}\n` +
+    `  and has been reduced to the project origin\n    ${url}\n` +
+    '  Only the origin belongs here — the /rest/v1 endpoint shown on the\n' +
+    '  dashboard sends every request down a wrong path.\n'
+  );
 }
 
 fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
