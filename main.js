@@ -18,10 +18,12 @@ const registerPurchaseOrders = require('./ipc/purchaseOrders');
 const registerPurchaseOrderItems = require('./ipc/purchaseOrderItems');
 const registerLock = require('./ipc/lock');
 const registerActivityMonitor = require('./ipc/activity');
+const registerAuth = require('./ipc/auth');
 
 let mainWindow;
 let db = null;
 let lockController = null;
+let authController = null;
 
 // Channels that never touch the shared database (or are pure reads of it)
 // stay usable even while another device holds the write lock. Every channel
@@ -37,6 +39,7 @@ const READONLY_EXEMPT_CHANNELS = new Set([
   'shell:openExternal',
   'updates:check', 'updates:download', 'updates:quitAndInstall', 'updates:openReleasesPage', 'updates:getVersion',
   'lock:getStatus', 'lock:requestAccess', 'lock:respondToRequest',
+  'auth:signIn', 'auth:signOut', 'auth:getSession', 'auth:getProfile',
   'purchaseOrderItems:invoices',
 ]);
 
@@ -94,6 +97,8 @@ app.whenReady().then(() => {
   registerCosting(ipcMain, db);
   registerPurchaseOrders(ipcMain, db);
   registerPurchaseOrderItems(ipcMain, db);
+
+  authController = registerAuth(ipcMain, () => mainWindow);
 
   lockController = registerLock(ipcMain, workspaceDir, () => mainWindow);
   registerActivityMonitor(ipcMain, () => mainWindow, () => app.quit());

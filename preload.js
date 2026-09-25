@@ -14,6 +14,17 @@ function makeCrud(domain) {
 }
 
 contextBridge.exposeInMainWorld('api', {
+  auth: {
+    signIn: (email, password) => ipcRenderer.invoke('auth:signIn', email, password),
+    signOut: () => ipcRenderer.invoke('auth:signOut'),
+    getSession: () => ipcRenderer.invoke('auth:getSession'),
+    getProfile: () => ipcRenderer.invoke('auth:getProfile'),
+    onChanged: (callback) => {
+      const listener = (_event, profile) => callback(profile);
+      ipcRenderer.on('auth:changed', listener);
+      return () => ipcRenderer.removeListener('auth:changed', listener);
+    },
+  },
   items: {
     ...makeCrud('items'),
     history: (id) => ipcRenderer.invoke('items:history', id),
