@@ -5,16 +5,11 @@
 // save_incoming_invoice(), because a REST client cannot span statements in a
 // transaction. See the migration for what that function does and why.
 //
-// Attachments stay on local disk for now. The path stored in the row is a
-// filename inside the workspace folder, which means an attachment added on one
-// machine is not visible on another: moving these to Supabase Storage is a
-// later step, and nothing here assumes they will stay local forever.
+// Attachments live in Supabase Storage, handled by ipc/attachments.js.
 
-const { dialog, shell, BrowserWindow } = require('electron');
-const crypto = require('crypto');
-const fs = require('fs');
+const { dialog, BrowserWindow } = require('electron');
 const path = require('path');
-const { attachmentsDir } = require('../workspace');
+const createAttachments = require('./attachments');
 const { getSupabase } = require('../db/supabase');
 const { table, unwrap, numericColumns } = require('../db/rest');
 
@@ -32,62 +27,7 @@ const coerceInvoice = numericColumns('total', 'shipping_tax');
 const coerceLine = numericColumns('quantity', 'unit_cost', 'line_total');
 
 module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
-  const dir = attachmentsDir(workspaceDir, 'incoming');
-
-  function removeAttachmentFile(fileName) {
-    if (!fileName || path.isAbsolute(fileName)) return;
-    fs.rmSync(path.join(dir, fileName), { force: true });
-  }
-
-  // Resolves what this save's attachment_path/attachment_name should be:
-  // a newly chosen file replaces (and cleans up) any old one, a remove
-  // request clears it, and otherwise the existing attachment carries over.
-  function resolveAttachment(current, data) {
-    if (data.remove_attachment) {
-      removeAttachmentFile(current && current.attachment_path);
-      return { attachment_path: null, attachment_name: null };
-    }
-    if (data.attachment_source_path) {
-      const ext = path.extname(data.attachment_source_path).toLowerCase();
-      const fileName = `${crypto.randomUUID()}${ext}`;
-      fs.mkdirSync(dir, { recursive: true });
-      fs.copyFileSync(data.attachment_source_path, path.join(dir, fileName));
-      removeAttachmentFile(current && current.attachment_path);
-      return {
-        attachment_path: fileName,
-        attachment_name: path.basename(data.attachment_source_path),
-      };
-    }
-    return {
-      attachment_path: (current && current.attachment_path) || null,
-      attachment_name: (current && current.attachment_name) || null,
-    };
-  }
-
-  function withAttachmentUrl(row) {
-    if (!row) return row;
-    if (!row.attachment_path) return { ...row, attachment_url: null };
-    const absPath = path.isAbsolute(row.attachment_path)
-      ? row.attachment_path
-      : path.join(dir, row.attachment_path);
-    return { ...row, attachment_url: `file://${absPath.replace(/\\/g, '/')}` };
-  }
-
-  // The SQLite list flattened the vendor join and rolled the line descriptions
-  // into one GROUP_CONCAT string. PostgREST returns them nested instead, so
-  // they are flattened back to the exact shape the table screen reads.
-  function flattenListRow(row) {
-    const lines = row.incoming_invoice_lines || [];
-    const names = lines.map((line) => (line.items && line.items.name) || line.description);
-    const flat = coerceInvoice(row);
-    delete flat.vendors;
-    delete flat.incoming_invoice_lines;
-    return {
-      ...flat,
-      vendor_name: (row.vendors && row.vendors.name) || null,
-      line_items: names.length ? names.join('||') : null,
-    };
-  }
+  const attachments = createAttachments('incoming', workspaceDir);
 
   async function getFullInvoice(id) {
     const row = unwrap(
@@ -118,12 +58,12 @@ module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
       })
       .sort((a, b) => a.id - b.id);
 
-    return withAttachmentUrl(invoice);
+    return invoice;
   }
 
   // Everything the save function needs, with the attachment already resolved
   // on this side because that part touches the filesystem, not the database.
-  function buildHeader(data, current) {
+  async function buildHeader(data, current) {
     return {
       vendor_id: data.vendor_id || null,
       invoice_number:
@@ -133,7 +73,7 @@ module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
       shipping_tax: Number(data.shipping_tax || 0),
       paid: !!data.paid,
       received: !!data.received,
-      ...resolveAttachment(current, data),
+      ...(await attachments.resolve(current, data)),
     };
   }
 
@@ -160,7 +100,7 @@ module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
 
     const { data: savedId, error } = await getSupabase().rpc('save_incoming_invoice', {
       p_id: id || null,
-      p_header: buildHeader(data, current),
+      p_header: await buildHeader(data, current),
       p_lines: buildLines(data),
     });
     return getFullInvoice(unwrap({ data: savedId, error }));
@@ -187,7 +127,7 @@ module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
     );
     const { error } = await getSupabase().rpc('delete_incoming_invoice', { p_id: id });
     unwrap({ data: null, error });
-    removeAttachmentFile(current && current.attachment_path);
+    await attachments.remove(current && current.attachment_path);
     return { ok: true };
   });
 
@@ -215,11 +155,6 @@ module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
     const invoice = unwrap(
       await table('incoming_invoices').select('attachment_path').eq('id', id).maybeSingle()
     );
-    if (!invoice || !invoice.attachment_path) return { ok: false };
-    const absPath = path.isAbsolute(invoice.attachment_path)
-      ? invoice.attachment_path
-      : path.join(dir, invoice.attachment_path);
-    const err = await shell.openPath(absPath);
-    return { ok: !err, error: err || null };
+    return attachments.open(invoice && invoice.attachment_path);
   });
 };

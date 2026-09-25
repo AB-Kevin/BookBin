@@ -5,16 +5,15 @@
 // REST client cannot span statements in a transaction. Selling reduces stock
 // rather than adding to it, and the total carries no shipping.
 //
-// Attachments and the company logo stay on local disk for now, as they do for
-// incoming invoices.
+// Attachments live in Supabase Storage, handled by ipc/attachments.js.
 
-const { BrowserWindow, dialog, shell } = require('electron');
-const crypto = require('crypto');
+const { BrowserWindow, dialog } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { buildInvoiceHtml } = require('../renderer/invoice-template');
-const { logoDir, attachmentsDir } = require('../workspace');
+const createAttachments = require('./attachments');
+const { resolveCompanyLogo } = require('./settings');
 const { getSupabase } = require('../db/supabase');
 const { table, unwrap, numericColumns } = require('../db/rest');
 
@@ -32,60 +31,7 @@ const coerceInvoice = numericColumns('total');
 const coerceLine = numericColumns('quantity', 'unit_price', 'line_total');
 
 module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
-  const dir = attachmentsDir(workspaceDir, 'outgoing');
-
-  function removeAttachmentFile(fileName) {
-    if (!fileName || path.isAbsolute(fileName)) return;
-    fs.rmSync(path.join(dir, fileName), { force: true });
-  }
-
-  // Resolves what this save's attachment_path/attachment_name should be:
-  // a newly chosen file replaces (and cleans up) any old one, a remove
-  // request clears it, and otherwise the existing attachment carries over.
-  function resolveAttachment(current, data) {
-    if (data.remove_attachment) {
-      removeAttachmentFile(current && current.attachment_path);
-      return { attachment_path: null, attachment_name: null };
-    }
-    if (data.attachment_source_path) {
-      const ext = path.extname(data.attachment_source_path).toLowerCase();
-      const fileName = `${crypto.randomUUID()}${ext}`;
-      fs.mkdirSync(dir, { recursive: true });
-      fs.copyFileSync(data.attachment_source_path, path.join(dir, fileName));
-      removeAttachmentFile(current && current.attachment_path);
-      return {
-        attachment_path: fileName,
-        attachment_name: path.basename(data.attachment_source_path),
-      };
-    }
-    return {
-      attachment_path: (current && current.attachment_path) || null,
-      attachment_name: (current && current.attachment_name) || null,
-    };
-  }
-
-  // Stores a copy of an exported PDF as the invoice's attachment directly
-  // from the in-memory buffer (used right after exportPdf writes it out),
-  // so "sending" a PDF invoice attaches it without a separate file picker step.
-  function storeGeneratedAttachment(current, buffer) {
-    removeAttachmentFile(current && current.attachment_path);
-    const fileName = `${crypto.randomUUID()}.pdf`;
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, fileName), buffer);
-    return {
-      attachment_path: fileName,
-      attachment_name: `${(current && current.invoice_number) || 'invoice'}.pdf`,
-    };
-  }
-
-  function withAttachmentUrl(row) {
-    if (!row) return row;
-    if (!row.attachment_path) return { ...row, attachment_url: null };
-    const absPath = path.isAbsolute(row.attachment_path)
-      ? row.attachment_path
-      : path.join(dir, row.attachment_path);
-    return { ...row, attachment_url: `file://${absPath.replace(/\\/g, '/')}` };
-  }
+  const attachments = createAttachments('outgoing', workspaceDir);
 
   async function getFullInvoice(id) {
     const row = unwrap(
@@ -119,10 +65,10 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
       })
       .sort((a, b) => a.id - b.id);
 
-    return withAttachmentUrl(invoice);
+    return invoice;
   }
 
-  function buildHeader(data, current) {
+  async function buildHeader(data, current) {
     return {
       customer_id: data.customer_id || null,
       invoice_number:
@@ -130,7 +76,7 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
       invoice_date: data.invoice_date,
       notes: data.notes || null,
       status: data.status || 'draft',
-      ...resolveAttachment(current, data),
+      ...(await attachments.resolve(current, data)),
     };
   }
 
@@ -155,7 +101,7 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
 
     const { data: savedId, error } = await getSupabase().rpc('save_outgoing_invoice', {
       p_id: id || null,
-      p_header: buildHeader(data, current),
+      p_header: await buildHeader(data, current),
       p_lines: buildLines(data),
     });
     return getFullInvoice(unwrap({ data: savedId, error }));
@@ -186,7 +132,7 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
     );
     const { error } = await getSupabase().rpc('delete_outgoing_invoice', { p_id: id });
     unwrap({ data: null, error });
-    removeAttachmentFile(current && current.attachment_path);
+    await attachments.remove(current && current.attachment_path);
     return { ok: true };
   });
 
@@ -205,31 +151,15 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
     const invoice = unwrap(
       await table('outgoing_invoices').select('attachment_path').eq('id', id).maybeSingle()
     );
-    if (!invoice || !invoice.attachment_path) return { ok: false };
-    const absPath = path.isAbsolute(invoice.attachment_path)
-      ? invoice.attachment_path
-      : path.join(dir, invoice.attachment_path);
-    const err = await shell.openPath(absPath);
-    return { ok: !err, error: err || null };
+    return attachments.open(invoice && invoice.attachment_path);
   });
-
-  // company_logo_path is stored as a filename relative to <workspace>/logo;
-  // the template needs a real absolute path to build a file:// src from.
-  function resolveLogoPath(company) {
-    if (!company || !company.company_logo_path) return company;
-    if (path.isAbsolute(company.company_logo_path)) return company;
-    return {
-      ...company,
-      company_logo_path: path.join(logoDir(workspaceDir), company.company_logo_path),
-    };
-  }
 
   ipcMain.handle('outgoingInvoices:exportPdf', async (event, id) => {
     const invoice = await getFullInvoice(id);
     if (!invoice) throw new Error('Invoice not found');
 
     const settings = unwrap(await table('settings').select('*').eq('id', 1).single());
-    const company = resolveLogoPath(settings);
+    const company = await resolveCompanyLogo(settings, workspaceDir);
     const html = buildInvoiceHtml({ invoice, company });
 
     const tempPath = path.join(os.tmpdir(), `bookbin-invoice-${id}-${Date.now()}.html`);
@@ -253,11 +183,10 @@ module.exports = function registerOutgoingInvoices(ipcMain, workspaceDir) {
       // draft export is just a preview, so it shouldn't overwrite whatever
       // attachment (or lack of one) the invoice already has.
       if (invoice.status === 'sent') {
-        unwrap(
-          await table('outgoing_invoices')
-            .update(storeGeneratedAttachment(invoice, pdfBuffer))
-            .eq('id', id)
+        const stored = await attachments.storeGenerated(
+          invoice, pdfBuffer, invoice.invoice_number
         );
+        unwrap(await table('outgoing_invoices').update(stored).eq('id', id));
       }
       return { ok: true, filePath, invoice: await getFullInvoice(id) };
     } finally {
