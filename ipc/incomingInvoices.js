@@ -1,14 +1,37 @@
+// Incoming invoices (bills from vendors).
+//
+// Ported to Supabase. Everything that has to happen together -- header, lines,
+// stock reversal, stock application, invoice numbering -- is one call to
+// save_incoming_invoice(), because a REST client cannot span statements in a
+// transaction. See the migration for what that function does and why.
+//
+// Attachments stay on local disk for now. The path stored in the row is a
+// filename inside the workspace folder, which means an attachment added on one
+// machine is not visible on another: moving these to Supabase Storage is a
+// later step, and nothing here assumes they will stay local forever.
+
 const { dialog, shell, BrowserWindow } = require('electron');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { attachmentsDir } = require('../workspace');
+const { getSupabase } = require('../db/supabase');
+const { table, unwrap, numericColumns } = require('../db/rest');
 
 const ATTACHMENT_FILTERS = [
   { name: 'Bills', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'] },
 ];
 
-module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
+const INVOICE_COLUMNS =
+  'id, vendor_id, invoice_number, invoice_date, notes, total, shipping_tax, ' +
+  'paid, received, attachment_path, attachment_name, created_at';
+
+const LINE_COLUMNS = 'id, invoice_id, item_id, description, quantity, unit_cost, line_total';
+
+const coerceInvoice = numericColumns('total', 'shipping_tax');
+const coerceLine = numericColumns('quantity', 'unit_cost', 'line_total');
+
+module.exports = function registerIncomingInvoices(ipcMain, workspaceDir) {
   const dir = attachmentsDir(workspaceDir, 'incoming');
 
   function removeAttachmentFile(fileName) {
@@ -21,7 +44,7 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
   // request clears it, and otherwise the existing attachment carries over.
   function resolveAttachment(current, data) {
     if (data.remove_attachment) {
-      removeAttachmentFile(current?.attachment_path);
+      removeAttachmentFile(current && current.attachment_path);
       return { attachment_path: null, attachment_name: null };
     }
     if (data.attachment_source_path) {
@@ -29,213 +52,154 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
       const fileName = `${crypto.randomUUID()}${ext}`;
       fs.mkdirSync(dir, { recursive: true });
       fs.copyFileSync(data.attachment_source_path, path.join(dir, fileName));
-      removeAttachmentFile(current?.attachment_path);
-      return { attachment_path: fileName, attachment_name: path.basename(data.attachment_source_path) };
+      removeAttachmentFile(current && current.attachment_path);
+      return {
+        attachment_path: fileName,
+        attachment_name: path.basename(data.attachment_source_path),
+      };
     }
     return {
-      attachment_path: current?.attachment_path ?? null,
-      attachment_name: current?.attachment_name ?? null,
+      attachment_path: (current && current.attachment_path) || null,
+      attachment_name: (current && current.attachment_name) || null,
     };
   }
 
-  const listStmt = db.prepare(`
-    SELECT ii.*, v.name AS vendor_name,
-      (SELECT GROUP_CONCAT(COALESCE(i.name, l.description), '||')
-       FROM incoming_invoice_lines l
-       LEFT JOIN items i ON i.id = l.item_id
-       WHERE l.invoice_id = ii.id) AS line_items
-    FROM incoming_invoices ii
-    LEFT JOIN vendors v ON v.id = ii.vendor_id
-    ORDER BY ii.invoice_date DESC, ii.id DESC
-  `);
-  const getInvoiceStmt = db.prepare(`
-    SELECT ii.*, v.name AS vendor_name
-    FROM incoming_invoices ii
-    LEFT JOIN vendors v ON v.id = ii.vendor_id
-    WHERE ii.id = ?
-  `);
-  const getLinesStmt = db.prepare(`
-    SELECT l.*, i.name AS item_name, i.is_inventory AS item_is_inventory
-    FROM incoming_invoice_lines l
-    LEFT JOIN items i ON i.id = l.item_id
-    WHERE l.invoice_id = ?
-    ORDER BY l.id
-  `);
-  const insertInvoiceStmt = db.prepare(`
-    INSERT INTO incoming_invoices (vendor_id, invoice_number, invoice_date, notes, total, shipping_tax, paid, received, attachment_path, attachment_name)
-    VALUES (@vendor_id, @invoice_number, @invoice_date, @notes, @total, @shipping_tax, @paid, @received, @attachment_path, @attachment_name)
-  `);
-  const updateInvoiceStmt = db.prepare(`
-    UPDATE incoming_invoices SET
-      vendor_id = @vendor_id, invoice_number = @invoice_number,
-      invoice_date = @invoice_date, notes = @notes, total = @total, shipping_tax = @shipping_tax,
-      paid = @paid, received = @received,
-      attachment_path = @attachment_path, attachment_name = @attachment_name
-    WHERE id = @id
-  `);
-  const setFlagsStmt = db.prepare('UPDATE incoming_invoices SET paid = @paid, received = @received WHERE id = @id');
-  const deleteInvoiceStmt = db.prepare('DELETE FROM incoming_invoices WHERE id = ?');
-  const deleteLinesStmt = db.prepare('DELETE FROM incoming_invoice_lines WHERE invoice_id = ?');
-  const insertLineStmt = db.prepare(`
-    INSERT INTO incoming_invoice_lines (invoice_id, item_id, description, quantity, unit_cost, line_total)
-    VALUES (@invoice_id, @item_id, @description, @quantity, @unit_cost, @line_total)
-  `);
-  const getItemStmt = db.prepare('SELECT * FROM items WHERE id = ?');
-  const adjustQtyStmt = db.prepare('UPDATE items SET quantity_on_hand = quantity_on_hand + ? WHERE id = ?');
-  const logAdjustmentStmt = db.prepare(`
-    INSERT INTO inventory_adjustments (item_id, delta, reason, source_type, source_id)
-    VALUES (@item_id, @delta, @reason, @source_type, @source_id)
-  `);
-  const getAdjustmentsForSourceStmt = db.prepare(`
-    SELECT * FROM inventory_adjustments WHERE source_type = ? AND source_id = ?
-  `);
-  const getSettingsStmt = db.prepare('SELECT * FROM settings WHERE id = 1');
-  const bumpIncomingNumberStmt = db.prepare(
-    'UPDATE settings SET incoming_next_number = incoming_next_number + 1 WHERE id = 1'
-  );
-
-  function nextInvoiceNumber() {
-    const settings = getSettingsStmt.get();
-    bumpIncomingNumberStmt.run();
-    return `${settings.incoming_prefix}${settings.incoming_next_number}`;
+  function withAttachmentUrl(row) {
+    if (!row) return row;
+    if (!row.attachment_path) return { ...row, attachment_url: null };
+    const absPath = path.isAbsolute(row.attachment_path)
+      ? row.attachment_path
+      : path.join(dir, row.attachment_path);
+    return { ...row, attachment_url: `file://${absPath.replace(/\\/g, '/')}` };
   }
 
-  function withInvoiceDefaults(data, current) {
+  // The SQLite list flattened the vendor join and rolled the line descriptions
+  // into one GROUP_CONCAT string. PostgREST returns them nested instead, so
+  // they are flattened back to the exact shape the table screen reads.
+  function flattenListRow(row) {
+    const lines = row.incoming_invoice_lines || [];
+    const names = lines.map((line) => (line.items && line.items.name) || line.description);
+    const flat = coerceInvoice(row);
+    delete flat.vendors;
+    delete flat.incoming_invoice_lines;
+    return {
+      ...flat,
+      vendor_name: (row.vendors && row.vendors.name) || null,
+      line_items: names.length ? names.join('||') : null,
+    };
+  }
+
+  async function getFullInvoice(id) {
+    const row = unwrap(
+      await table('incoming_invoices')
+        .select(`${INVOICE_COLUMNS}, vendors(name), incoming_invoice_lines(${LINE_COLUMNS}, items(name, is_inventory))`)
+        .eq('id', id)
+        .maybeSingle()
+    );
+    if (!row) return null;
+
+    const rawLines = row.incoming_invoice_lines || [];
+    const invoice = coerceInvoice(row);
+    delete invoice.vendors;
+    delete invoice.incoming_invoice_lines;
+
+    invoice.vendor_name = (row.vendors && row.vendors.name) || null;
+    // Ordered here rather than in the query: PostgREST orders embedded rows
+    // awkwardly, and a line list is never long enough for it to matter.
+    invoice.lines = rawLines
+      .map((line) => {
+        const flat = coerceLine(line);
+        delete flat.items;
+        return {
+          ...flat,
+          item_name: (line.items && line.items.name) || null,
+          item_is_inventory: line.items ? line.items.is_inventory : null,
+        };
+      })
+      .sort((a, b) => a.id - b.id);
+
+    return withAttachmentUrl(invoice);
+  }
+
+  // Everything the save function needs, with the attachment already resolved
+  // on this side because that part touches the filesystem, not the database.
+  function buildHeader(data, current) {
     return {
       vendor_id: data.vendor_id || null,
-      invoice_number: data.invoice_number && data.invoice_number.trim() ? data.invoice_number.trim() : null,
+      invoice_number:
+        data.invoice_number && data.invoice_number.trim() ? data.invoice_number.trim() : null,
       invoice_date: data.invoice_date,
       notes: data.notes || null,
       shipping_tax: Number(data.shipping_tax || 0),
-      paid: data.paid ? 1 : 0,
-      received: data.received ? 1 : 0,
+      paid: !!data.paid,
+      received: !!data.received,
       ...resolveAttachment(current, data),
     };
   }
 
-  // The invoice's total reflects what was actually paid the vendor, so it
-  // includes shipping/tax rather than just the sum of line items.
-  function computeTotal(lines, shippingTax) {
-    const linesTotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_cost), 0);
-    return linesTotal + Number(shippingTax || 0);
+  function buildLines(data) {
+    return (data.lines || []).map((line) => ({
+      item_id: line.item_id || null,
+      description: line.description,
+      quantity: Number(line.quantity),
+      unit_cost: Number(line.unit_cost),
+    }));
   }
 
-  // Reverses any inventory effect a previous save of this invoice caused,
-  // writing compensating (negated) log rows rather than mutating history.
-  function reverseStockEffects(invoiceId) {
-    const rows = getAdjustmentsForSourceStmt.all('incoming_invoice', invoiceId);
-    for (const row of rows) {
-      adjustQtyStmt.run(-row.delta, row.item_id);
-      logAdjustmentStmt.run({
-        item_id: row.item_id,
-        delta: -row.delta,
-        reason: `Reversed: ${row.reason}`,
-        source_type: 'incoming_invoice',
-        source_id: invoiceId,
-      });
-    }
+  async function save(id, data) {
+    // The current row is needed only to know which attachment file to replace
+    // or clean up; the database function does not need it.
+    const current = id
+      ? unwrap(
+          await table('incoming_invoices')
+            .select('attachment_path, attachment_name')
+            .eq('id', id)
+            .maybeSingle()
+        )
+      : null;
+
+    const { data: savedId, error } = await getSupabase().rpc('save_incoming_invoice', {
+      p_id: id || null,
+      p_header: buildHeader(data, current),
+      p_lines: buildLines(data),
+    });
+    return getFullInvoice(unwrap({ data: savedId, error }));
   }
 
-  function applyStockEffects(invoiceId, invoiceNumber, lines) {
-    for (const line of lines) {
-      if (!line.item_id) continue;
-      const item = getItemStmt.get(line.item_id);
-      if (!item || !item.is_inventory) continue;
-      const delta = Number(line.quantity);
-      adjustQtyStmt.run(delta, item.id);
-      logAdjustmentStmt.run({
-        item_id: item.id,
-        delta,
-        reason: `Incoming invoice ${invoiceNumber}`,
-        source_type: 'incoming_invoice',
-        source_id: invoiceId,
-      });
-    }
-  }
-
-  // attachment_path is stored as a filename inside <workspace>/attachments/incoming
-  // so it stays portable across devices sharing a workspace folder.
-  function withAttachmentUrl(row) {
-    if (!row) return row;
-    if (!row.attachment_path) return { ...row, attachment_url: null };
-    const absPath = path.isAbsolute(row.attachment_path) ? row.attachment_path : path.join(dir, row.attachment_path);
-    return { ...row, attachment_url: `file://${absPath.replace(/\\/g, '/')}` };
-  }
-
-  function getFullInvoice(id) {
-    const invoice = withAttachmentUrl(getInvoiceStmt.get(id));
-    if (!invoice) return null;
-    invoice.lines = getLinesStmt.all(id);
-    return invoice;
-  }
-
-  const createTx = db.transaction((data) => {
-    const header = withInvoiceDefaults(data, null);
-    if (!header.invoice_number) header.invoice_number = nextInvoiceNumber();
-    const lines = data.lines || [];
-    header.total = computeTotal(lines, header.shipping_tax);
-
-    const info = insertInvoiceStmt.run(header);
-    const invoiceId = info.lastInsertRowid;
-
-    for (const line of lines) {
-      insertLineStmt.run({
-        invoice_id: invoiceId,
-        item_id: line.item_id || null,
-        description: line.description,
-        quantity: Number(line.quantity),
-        unit_cost: Number(line.unit_cost),
-        line_total: Number(line.quantity) * Number(line.unit_cost),
-      });
-    }
-
-    applyStockEffects(invoiceId, header.invoice_number, lines);
-    return invoiceId;
+  ipcMain.handle('incomingInvoices:list', async () => {
+    const rows = unwrap(
+      await table('incoming_invoices')
+        .select(`${INVOICE_COLUMNS}, vendors(name), incoming_invoice_lines(description, items(name))`)
+        .order('invoice_date', { ascending: false })
+        .order('id', { ascending: false })
+    );
+    return rows.map(flattenListRow);
   });
 
-  const updateTx = db.transaction((id, data) => {
-    reverseStockEffects(id);
-    deleteLinesStmt.run(id);
-
-    const current = getInvoiceStmt.get(id);
-    const header = withInvoiceDefaults(data, current);
-    if (!header.invoice_number) header.invoice_number = nextInvoiceNumber();
-    const lines = data.lines || [];
-    header.total = computeTotal(lines, header.shipping_tax);
-    header.id = id;
-    updateInvoiceStmt.run(header);
-
-    for (const line of lines) {
-      insertLineStmt.run({
-        invoice_id: id,
-        item_id: line.item_id || null,
-        description: line.description,
-        quantity: Number(line.quantity),
-        unit_cost: Number(line.unit_cost),
-        line_total: Number(line.quantity) * Number(line.unit_cost),
-      });
-    }
-
-    applyStockEffects(id, header.invoice_number, lines);
-  });
-
-  const deleteTx = db.transaction((id) => {
-    const current = getInvoiceStmt.get(id);
-    removeAttachmentFile(current?.attachment_path);
-    reverseStockEffects(id);
-    deleteInvoiceStmt.run(id); // cascades to lines
-  });
-
-  ipcMain.handle('incomingInvoices:list', () => listStmt.all());
   ipcMain.handle('incomingInvoices:get', (_e, id) => getFullInvoice(id));
-  ipcMain.handle('incomingInvoices:create', (_e, data) => {
-    const id = createTx(data);
+  ipcMain.handle('incomingInvoices:create', (_e, data) => save(null, data));
+  ipcMain.handle('incomingInvoices:update', (_e, id, data) => save(id, data));
+
+  ipcMain.handle('incomingInvoices:delete', async (_e, id) => {
+    // Read the filename before the row goes, or the file is orphaned on disk.
+    const current = unwrap(
+      await table('incoming_invoices').select('attachment_path').eq('id', id).maybeSingle()
+    );
+    const { error } = await getSupabase().rpc('delete_incoming_invoice', { p_id: id });
+    unwrap({ data: null, error });
+    removeAttachmentFile(current && current.attachment_path);
+    return { ok: true };
+  });
+
+  ipcMain.handle('incomingInvoices:setFlags', async (_e, id, flags) => {
+    unwrap(
+      await table('incoming_invoices')
+        .update({ paid: !!flags.paid, received: !!flags.received })
+        .eq('id', id)
+    );
     return getFullInvoice(id);
   });
-  ipcMain.handle('incomingInvoices:update', (_e, id, data) => {
-    updateTx(id, data);
-    return getFullInvoice(id);
-  });
+
   ipcMain.handle('incomingInvoices:chooseAttachment', async (event) => {
     const parentWindow = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(parentWindow, {
@@ -246,18 +210,16 @@ module.exports = function registerIncomingInvoices(ipcMain, db, workspaceDir) {
     if (canceled || !filePaths.length) return null;
     return { filePath: filePaths[0], fileName: path.basename(filePaths[0]) };
   });
-  ipcMain.handle('incomingInvoices:openAttachment', (_e, id) => {
-    const invoice = getInvoiceStmt.get(id);
-    if (!invoice?.attachment_path) return { ok: false };
-    const absPath = path.isAbsolute(invoice.attachment_path) ? invoice.attachment_path : path.join(dir, invoice.attachment_path);
-    return shell.openPath(absPath).then((err) => ({ ok: !err, error: err || null }));
-  });
-  ipcMain.handle('incomingInvoices:delete', (_e, id) => {
-    deleteTx(id);
-    return { ok: true };
-  });
-  ipcMain.handle('incomingInvoices:setFlags', (_e, id, flags) => {
-    setFlagsStmt.run({ id, paid: flags.paid ? 1 : 0, received: flags.received ? 1 : 0 });
-    return getFullInvoice(id);
+
+  ipcMain.handle('incomingInvoices:openAttachment', async (_e, id) => {
+    const invoice = unwrap(
+      await table('incoming_invoices').select('attachment_path').eq('id', id).maybeSingle()
+    );
+    if (!invoice || !invoice.attachment_path) return { ok: false };
+    const absPath = path.isAbsolute(invoice.attachment_path)
+      ? invoice.attachment_path
+      : path.join(dir, invoice.attachment_path);
+    const err = await shell.openPath(absPath);
+    return { ok: !err, error: err || null };
   });
 };
