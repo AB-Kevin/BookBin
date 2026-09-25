@@ -39,6 +39,7 @@ const READONLY_EXEMPT_SUFFIXES = new Set(['list', 'get', 'history']);
 const PORTED_DOMAINS = new Set([
   'vendors', 'customers', 'items', 'incomingInvoices', 'costing',
   'outgoingInvoices', 'purchaseOrders', 'purchaseOrderItems',
+  'settings', 'dashboard',
 ]);
 const READONLY_EXEMPT_CHANNELS = new Set([
   'dashboard:summary',
@@ -100,8 +101,8 @@ app.whenReady().then(() => {
   registerCustomers(ipcMain);
   registerIncomingInvoices(ipcMain, workspaceDir);
   registerOutgoingInvoices(ipcMain, workspaceDir);
-  registerSettings(ipcMain, db, workspaceDir);
-  registerDashboard(ipcMain, db);
+  registerSettings(ipcMain, workspaceDir);
+  registerDashboard(ipcMain);
   registerUpdates(ipcMain, () => mainWindow);
   registerWorkspace(ipcMain, db, workspaceDir);
   registerShell(ipcMain);
