@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the Windows (.exe) and macOS (.dmg/.zip) installers and publishes
-# them both to the GitHub Release for the pushed tag.
+# Builds the Windows (.exe) and macOS (.dmg/.zip) installers and the Android
+# APK, and publishes them all to the GitHub Release for the pushed tag.
 #
 # Usage:
 #   npm version patch   # or minor / major — bumps package.json, commits, tags
@@ -102,3 +102,63 @@ jobs:
               exit 1
             fi
           done
+
+  # The Android APK. It is uploaded to the release with gh rather than
+  # electron-builder's publisher, and the release already exists by now, so
+  # this job has neither race to worry about and runs alongside the desktop
+  # builds.
+  #
+  # Needs the signing key as repository secrets:
+  #   ANDROID_KEYSTORE_BASE64    base64 of android/bookbin-release.jks
+  #   ANDROID_KEYSTORE_PASSWORD  storePassword from android/keystore.properties
+  #   ANDROID_KEY_ALIAS          keyAlias      (bookbin)
+  #   ANDROID_KEY_PASSWORD       keyPassword
+  release-android:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - run: npm ci
+
+      - name: Restore the signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::The ANDROID_KEYSTORE_BASE64 repository secret is missing, so the APK cannot be signed."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/bookbin-release.jks"
+
+      # chmod: a gradlew committed from Windows can lose its executable bit.
+      - name: Build APK
+        run: |
+          chmod +x android/gradlew
+          npm run android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/bookbin-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Upload APK to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          gh release upload "v$VERSION" "dist/BookBin-$VERSION.apk" --repo "${{ github.repository }}" --clobber

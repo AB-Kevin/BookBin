@@ -11,3 +11,9 @@ config/supabase.generated.json
 
 # Exported business data. Never commit - the repo is public.
 supabase/seed/
+
+# Supabase CLI's local cache (linked project, version check).
+supabase/.temp/
+
+# Android web bundle, rebuilt from renderer/ by scripts/build-mobile.js.
+mobile/www/

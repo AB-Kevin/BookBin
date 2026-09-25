@@ -92,19 +92,9 @@ Then:
    It holds the `service_role` key server-side, which is the only way an app
    that users can unpack is allowed to create accounts at all.
 
-### Migrating data from the old SQLite version
-
-`scripts/export-to-supabase.js` reads a v1 `bookbin.db` and writes a
-transactional SQL file plus a verification query with the expected row counts,
-sums and totals baked in:
-
-```
-npm run export
-```
-
-Load `supabase/seed/bookbin-data.sql`, then run
-`supabase/seed/verify-data.sql`. Both files are gitignored — they contain real
-business data.
+If a newly created account never shows up on the Users page,
+`supabase/diagnose-users.sql` lists every sign-in account and whether it got a
+profile.
 
 ## What it does
 
@@ -174,9 +164,65 @@ that cannot connect.
 `SUPABASE_URL` must be the project origin. A path on the end is reduced to
 the origin at build time, with a warning in the build log.
 
+The same run builds the Android APK (`BookBin-<version>.apk`) and adds it to
+the release. It needs four more repository secrets, from the signing key in
+`android/`: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` (see the Android section below).
+
 The sidebar footer shows the installed version and checks that release feed on
 launch. On Windows it installs the update in place; on Mac — only ad-hoc
 signed, not enough for a silent install — it opens the release page instead.
+
+## Android
+
+The Android app is the same renderer wrapped by
+[Capacitor](https://capacitorjs.com), running the same database code.
+`scripts/build-mobile.js` copies `renderer/` into `mobile/www` and bundles
+`mobile/main.js` beside it with esbuild. That bundle is `preload.js` and the
+`ipc/*.js` modules, unchanged, with Electron and Node swapped for the small
+stand-ins in `mobile/shims/`, so `window.api` is answered by the same handlers
+as on the desktop, just without a process boundary between them. A change to
+an `ipc/` module reaches both apps.
+
+Attachments use Android's file picker, and open in whichever app on the phone
+handles the file type. **Export PDF** renders the same invoice template
+through BookBin's own small native plugin
+(`android/app/src/main/java/com/bookbin/app/PdfPrinterPlugin.java`) and opens
+the PDF, where the phone's share, print and save options are. Left out on
+purpose: backups, and setting up a new database (do that on the desktop, then
+add it on the phone with a connection code).
+
+Building needs Android Studio installed (for its JDK and the Android SDK),
+nothing else:
+
+```
+npm run android:run     # debug build, installed and started on a connected phone
+npm run android:debug   # dist/BookBin-<version>-debug.apk, for trying things out
+npm run android         # dist/BookBin-<version>.apk, signed for release
+```
+
+The version comes from `package.json`, so `npm version` bumps it with the
+desktop builds.
+
+**The signing key.** A release APK is signed with `android/bookbin-release.jks`,
+whose passwords are in `android/keystore.properties`. Both are gitignored.
+Every release must be signed with this same key: a phone refuses to update an
+installed copy from an APK signed with any other, so if the key is lost,
+everyone has to uninstall BookBin before they can install a newer one. Keep a
+copy somewhere other than this computer and GitHub.
+
+For the release workflow, add these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | output of `base64 -w0 android/bookbin-release.jks` (Git Bash) |
+| `ANDROID_KEYSTORE_PASSWORD` | `storePassword` from `android/keystore.properties` |
+| `ANDROID_KEY_ALIAS` | `keyAlias` (`bookbin`) |
+| `ANDROID_KEY_PASSWORD` | `keyPassword` |
+
+**Installing** from a release: open the `.apk` from the GitHub release page on
+the phone and allow installs from that browser when asked. Android does not
+update it automatically; install the newer APK over the old one.
 
 ## Project layout
 
@@ -195,7 +241,10 @@ ipc/                   One module per domain — all database access happens
 renderer/              Plain HTML/CSS/JS UI, no framework, no build step
   screens/             One file per screen
   invoice-template.js  Builds the printable invoice HTML (shared by PDF export)
-scripts/               Build-time config writer and the one-off SQLite export
+scripts/               Build-time config writer, Android build scripts
+mobile/main.js         The Android app's main.js: registers ipc/ in the page
+mobile/shims/          Electron and Node stand-ins for the Android bundle
+android/               Capacitor's Android project (Gradle)
 supabase/
   migrations/          Schema, policies, and functions
   functions/           Edge Functions (account creation)

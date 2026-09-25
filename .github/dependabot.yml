@@ -8,7 +8,7 @@ updates:
     schedule:
       interval: "weekly"
 
-  # Keep npm dependencies (electron, electron-builder, better-sqlite3, ...) current.
+  # Keep npm dependencies (electron, electron-builder, supabase-js, ...) current.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:

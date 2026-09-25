@@ -90,8 +90,10 @@ async function renderList(container) {
 async function exportPdf(id) {
   const result = await window.api.outgoingInvoices.exportPdf(id);
   if (result.canceled) return result;
-  if (result.ok) window.alert(`Saved PDF to:\n${result.filePath}`);
-  else window.alert('Could not export PDF.');
+  // `shown`: the PDF was already opened for the person (the Android app),
+  // so there is nothing to tell them.
+  if (result.ok && !result.shown) window.alert(result.message || `Saved PDF to:\n${result.filePath}`);
+  else if (!result.ok) window.alert('Could not export PDF.');
   return result;
 }
 

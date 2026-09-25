@@ -49,15 +49,30 @@ function buildNav() {
   nav.querySelectorAll('.nav-link').forEach((link) => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
+      setDrawerOpen(false);
       window.Helpers.navigate(`/${link.dataset.section}`);
     });
   });
 }
 
+// Phone-width windows (the Android app, or a very narrow desktop window) show
+// the sidebar as a drawer instead, full width with its labels, so the
+// collapsed icon rail does not apply there. Kept in step with the media query
+// in styles.css.
+const narrowScreen = window.matchMedia('(max-width: 720px)');
+
+function savedCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
 function setSidebarCollapsed(collapsed) {
   const sidebar = document.getElementById('sidebar');
   const toggle = document.getElementById('sidebar-toggle');
-  sidebar.classList.toggle('collapsed', collapsed);
+  sidebar.classList.toggle('collapsed', collapsed && !narrowScreen.matches);
   toggle.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
   toggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
   try {
@@ -67,17 +82,65 @@ function setSidebarCollapsed(collapsed) {
   }
 }
 
+function setDrawerOpen(open) {
+  document.body.classList.toggle('drawer-open', open && narrowScreen.matches);
+}
+
 function initSidebarToggle() {
-  let collapsed = false;
-  try {
-    collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
-  } catch (err) {
-    // ignore
-  }
-  setSidebarCollapsed(collapsed);
+  setSidebarCollapsed(savedCollapsed());
 
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
     setSidebarCollapsed(!document.getElementById('sidebar').classList.contains('collapsed'));
+  });
+  narrowScreen.addEventListener('change', () => {
+    setDrawerOpen(false);
+    setSidebarCollapsed(savedCollapsed());
+  });
+
+  document.getElementById('drawer-open').addEventListener('click', () => setDrawerOpen(true));
+  document.getElementById('sidebar-backdrop').addEventListener('click', () => setDrawerOpen(false));
+}
+
+// Android's back button (see mobile/main.js) asks the page first: an open
+// dialog or drawer closes, and only otherwise does it go back a page.
+window.addEventListener('bookbin:back', (e) => {
+  if (document.querySelector('#modal-root .modal-backdrop')) {
+    window.Helpers.hideModal();
+    e.preventDefault();
+  } else if (document.body.classList.contains('drawer-open')) {
+    setDrawerOpen(false);
+    e.preventDefault();
+  }
+});
+
+// Each cell gets its column's heading as data-label, which the narrow-screen
+// styles show above the value once a table's rows become cards. Done here,
+// for every table any screen draws, rather than in each screen's markup.
+function labelTableCells(root) {
+  root.querySelectorAll('table').forEach((table) => {
+    const headerRow = table.querySelector('thead tr');
+    if (!headerRow) return;
+    const labels = [];
+    headerRow.querySelectorAll('th').forEach((th) => {
+      const copy = th.cloneNode(true);
+      copy.querySelectorAll('.icon').forEach((el) => el.remove());
+      const text = copy.textContent.trim();
+      for (let i = 0; i < (th.colSpan || 1); i++) labels.push(text);
+    });
+    table.querySelectorAll('tbody tr').forEach((tr) => {
+      let column = 0;
+      Array.from(tr.children).forEach((td) => {
+        if (!td.hasAttribute('data-label')) td.setAttribute('data-label', labels[column] || '');
+        column += td.colSpan || 1;
+      });
+    });
+  });
+}
+
+function watchTables() {
+  ['content', 'modal-root'].forEach((id) => {
+    const root = document.getElementById(id);
+    new MutationObserver(() => labelTableCells(root)).observe(root, { childList: true, subtree: true });
   });
 }
 
@@ -120,6 +183,7 @@ async function render() {
   window.Helpers.qsa('.nav-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.section === section);
   });
+  setDrawerOpen(false);
 
   const container = document.getElementById('content');
   container.innerHTML = '<p class="loading">Loading…</p>';
@@ -369,6 +433,7 @@ function startApp() {
   appStarted = true;
   initSidebarToggle();
   initActivityBanner();
+  watchTables();
 }
 
 // Which database the app last showed. Opening a different one starts it on

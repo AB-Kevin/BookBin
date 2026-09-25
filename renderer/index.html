@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file:" />
   <title>BookBin</title>
   <script src="theme.js"></script>
@@ -26,6 +27,14 @@
       <div id="sidebar-user"></div>
       <div id="sidebar-footer" data-update-widget></div>
     </aside>
+    <!-- Phone-width windows only: the sidebar becomes a drawer, opened from
+         this bar (see the narrow-screen section of styles.css). -->
+    <div id="sidebar-backdrop"></div>
+    <header id="topbar">
+      <button id="drawer-open" class="icon-btn" type="button" title="Menu" aria-label="Menu"><span class="icon">menu</span></button>
+      <span class="logo-mark"><span class="icon">auto_stories</span></span>
+      <span id="topbar-title">BookBin</span>
+    </header>
     <main id="content"></main>
   </div>
   <div id="modal-root"></div>

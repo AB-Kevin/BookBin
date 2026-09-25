@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- BookBin's page background (the bg colour in renderer/styles.css), shown behind
+         the launch icon and before the page first paints. -->
+    <color name="bookbin_background">#F7F6F2</color>
+</resources>
