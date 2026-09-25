@@ -87,6 +87,7 @@ function screenFor(section) {
 }
 
 async function render() {
+  if (!currentProfile) return;
   const { section, param, rest } = parseHash();
   window.Helpers.qsa('.nav-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.section === section);
@@ -106,6 +107,9 @@ async function render() {
 // ipc/updates.js owns autoUpdater and does all the talking to GitHub; this
 // just mirrors the status it pushes over "updates:status" into the sidebar
 // footer widget.
+let currentProfile = null;
+let appStarted = false;
+
 let updateStatus = { state: 'idle' };
 let appVersion = '';
 
@@ -384,9 +388,66 @@ async function initLockAndActivity() {
   });
 }
 
-buildNav();
-initSidebarToggle();
-initUpdateWidget();
-initLockAndActivity();
+function renderUserWidget() {
+  const box = document.getElementById('sidebar-user');
+  if (!box) return;
+  if (!currentProfile) {
+    box.innerHTML = '';
+    return;
+  }
+  const { escapeHtml } = window.Helpers;
+  const name = currentProfile.fullName || currentProfile.email || 'Signed in';
+  const role = currentProfile.role === 'owner' ? 'Owner' : 'Manager';
+  box.innerHTML = `
+    <div class="user-row" title="${escapeHtml(currentProfile.email || '')}">
+      <span class="user-name">${escapeHtml(name)}</span>
+      <span class="user-role">${escapeHtml(role)}</span>
+    </div>
+    <button class="user-signout" id="sign-out-btn" type="button" title="Sign out" aria-label="Sign out"><span class="signout-label">Sign out</span><span class="signout-icon" aria-hidden="true">⎋</span></button>
+  `;
+  box.querySelector('#sign-out-btn').addEventListener('click', async () => {
+    await window.api.auth.signOut();
+  });
+}
+
+// Everything below the login runs once, the first time somebody signs in.
+// Signing out and back in re-renders but does not re-attach listeners.
+function startApp() {
+  if (appStarted) return;
+  appStarted = true;
+  buildNav();
+  initSidebarToggle();
+  initUpdateWidget();
+  initLockAndActivity();
+}
+
+function applyProfile(profile) {
+  currentProfile = profile || null;
+  document.body.classList.toggle('signed-out', !currentProfile);
+  if (currentProfile) {
+    startApp();
+    renderUserWidget();
+    render();
+  } else {
+    renderUserWidget();
+    window.Login.reset();
+    window.Login.show();
+  }
+}
+
+async function initAuth() {
+  // Start hidden rather than flashing the app for the moment it takes to
+  // learn there is no session.
+  document.body.classList.add('signed-out');
+  let profile = null;
+  try {
+    profile = await window.api.auth.getSession();
+  } catch (err) {
+    console.error('session check failed', err);
+  }
+  applyProfile(profile);
+  window.api.auth.onChanged(applyProfile);
+}
+
 window.addEventListener('hashchange', render);
-window.addEventListener('DOMContentLoaded', render);
+window.addEventListener('DOMContentLoaded', initAuth);
