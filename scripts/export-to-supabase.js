@@ -160,6 +160,160 @@ const SETTINGS_COLUMNS = [
 
 const ROWS_PER_INSERT = 200;
 
+// ------------------------------------------------- data verification build
+
+// Aggregates computed on the SQLite side at export time and re-computed on the
+// Postgres side afterwards. Row counts alone would pass even if every value in
+// a row landed in the wrong column, so each table also gets sums over its
+// numeric columns, and the tables with converted booleans get true-counts.
+const NUMERIC_SUMS = {
+  items: ['quantity_on_hand', 'default_cost', 'default_price'],
+  incoming_invoices: ['total', 'shipping_tax'],
+  incoming_invoice_lines: ['quantity', 'unit_cost', 'line_total'],
+  outgoing_invoices: ['total'],
+  outgoing_invoice_lines: ['quantity', 'unit_price', 'line_total'],
+  inventory_adjustments: ['delta'],
+  item_cost_snapshots: ['cost', 'price', 'markup_percent'],
+  purchase_order_items: ['quantity_wanted', 'max_price'],
+};
+
+// The 0/1 -> boolean conversion is the easiest thing to get silently backwards.
+const BOOLEAN_COLUMNS = {
+  items: ['is_inventory'],
+  incoming_invoices: ['paid', 'received'],
+};
+
+// Tagging naive UTC strings with +00 is the other silent-failure risk: get it
+// wrong and every timestamp shifts by the server's offset while still looking
+// perfectly plausible. Comparing the extreme values in UTC catches it.
+const TIMESTAMP_TABLES = ['incoming_invoices', 'inventory_adjustments', 'items'];
+
+function buildDataVerification(db, sourcePath) {
+  const checks = [];
+  const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
+
+  for (const [table] of TABLES) {
+    const n = db.prepare(`select count(*) c from "${table}"`).get().c;
+    checks.push(
+      `select ${lit(table)} as table_name, 'row count' as check_name,\n` +
+      `  case when (select count(*) from public.${table}) = ${n} then 'PASS'\n` +
+      `       else 'FAIL - expected ${n}, got ' || (select count(*) from public.${table})::text end as status`
+    );
+
+    if (n === 0) continue;
+
+    const maxId = db.prepare(`select max(id) m from "${table}"`).get().m;
+    checks.push(
+      `select ${lit(table)}, 'max id',\n` +
+      `  case when (select max(id) from public.${table}) = ${maxId} then 'PASS'\n` +
+      `       else 'FAIL - expected ${maxId}, got ' || (select max(id) from public.${table})::text end`
+    );
+
+    // The identity sequence must sit past the loaded ids, or the app's next
+    // insert collides with an existing row.
+    checks.push(
+      `select ${lit(table)}, 'id sequence past data',\n` +
+      `  case when (select last_value from pg_sequences\n` +
+      `              where schemaname = 'public'\n` +
+      `                and sequencename = split_part(\n` +
+      `                      pg_get_serial_sequence('public.${table}', 'id'), '.', 2)) > ${maxId}\n` +
+      `       then 'PASS'\n` +
+      `       else 'FAIL - next insert would collide with existing id ${maxId}' end`
+    );
+
+    for (const col of NUMERIC_SUMS[table] || []) {
+      const raw = db.prepare(`select coalesce(sum("${col}"), 0) s from "${table}"`).get().s;
+      const expected = Number(Number(raw).toFixed(2));
+      checks.push(
+        `select ${lit(table)}, ${lit('sum of ' + col)},\n` +
+        `  case when round(coalesce((select sum(${col}) from public.${table}), 0), 2) = ${expected}\n` +
+        `       then 'PASS'\n` +
+        `       else 'FAIL - expected ${expected}, got ' || round(coalesce((select sum(${col}) from public.${table}), 0), 2)::text end`
+      );
+    }
+
+    for (const col of BOOLEAN_COLUMNS[table] || []) {
+      const trues = db.prepare(`select count(*) c from "${table}" where "${col}" = 1`).get().c;
+      checks.push(
+        `select ${lit(table)}, ${lit(col + ' = true count')},\n` +
+        `  case when (select count(*) from public.${table} where ${col}) = ${trues} then 'PASS'\n` +
+        `       else 'FAIL - expected ${trues}, got ' || (select count(*) from public.${table} where ${col})::text end`
+      );
+    }
+
+    if (TIMESTAMP_TABLES.includes(table)) {
+      const range = db.prepare(
+        `select min(created_at) lo, max(created_at) hi from "${table}"`
+      ).get();
+      if (range.lo && range.hi) {
+        checks.push(
+          `select ${lit(table)}, 'created_at range (UTC)',\n` +
+          `  case when (select to_char(min(created_at) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')\n` +
+          `               || ' .. ' ||\n` +
+          `             to_char(max(created_at) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')\n` +
+          `             from public.${table}) = ${lit(range.lo + ' .. ' + range.hi)}\n` +
+          `       then 'PASS' else 'FAIL - timestamps shifted; expected ' ||\n` +
+          `            ${lit(range.lo + ' .. ' + range.hi)} || ', got ' ||\n` +
+          `            (select to_char(min(created_at) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')\n` +
+          `               || ' .. ' ||\n` +
+          `             to_char(max(created_at) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')\n` +
+          `             from public.${table}) end`
+        );
+      }
+    }
+  }
+
+  // Referential integrity: ids were carried over by hand, so prove nothing
+  // points at a parent that did not come across.
+  const orphanChecks = [
+    ['incoming_invoice_lines', 'invoice_id', 'incoming_invoices'],
+    ['outgoing_invoice_lines', 'invoice_id', 'outgoing_invoices'],
+    ['inventory_adjustments', 'item_id', 'items'],
+    ['item_cost_snapshots', 'item_id', 'items'],
+    ['purchase_order_items', 'purchase_order_id', 'purchase_orders'],
+    ['incoming_invoices', 'vendor_id', 'vendors'],
+    ['outgoing_invoices', 'customer_id', 'customers'],
+  ];
+  for (const [child, fk, parent] of orphanChecks) {
+    checks.push(
+      `select ${lit(child)}, ${lit('no orphaned ' + fk)},\n` +
+      `  case when (select count(*) from public.${child} c\n` +
+      `              where c.${fk} is not null\n` +
+      `                and not exists (select 1 from public.${parent} p where p.id = c.${fk})) = 0\n` +
+      `       then 'PASS' else 'FAIL - orphaned rows found' end`
+    );
+  }
+
+  const settings = db.prepare('select * from settings where id = 1').get();
+  if (settings) {
+    checks.push(
+      `select 'settings', 'invoice numbering carried over',\n` +
+      `  case when (select incoming_next_number = ${Number(settings.incoming_next_number)}\n` +
+      `               and outgoing_next_number = ${Number(settings.outgoing_next_number)}\n` +
+      `             from public.settings where id = 1) then 'PASS'\n` +
+      `       else 'FAIL - next invoice numbers do not match' end`
+    );
+  }
+
+  return [
+    '-- BookBin data verification. Reads only; changes nothing.',
+    `-- Generated from: ${sourcePath}`,
+    `-- Generated: ${new Date().toISOString()}`,
+    '--',
+    '-- Every expected value below was measured on the SQLite database at export',
+    '-- time, so these numbers cannot drift out of step with the data file beside',
+    '-- them. Run this AFTER loading bookbin-data.sql.',
+    '--',
+    '-- One statement on purpose: the SQL Editor shows only one result set.',
+    '-- Sort by the status column to bring any failure to the top.',
+    '',
+    'select table_name, check_name, status from (',
+    checks.join('\n\nunion all\n'),
+    ') checks order by (status <> \'PASS\') desc, table_name, check_name;',
+    '',
+  ].join('\n');
+}
+
 // ----------------------------------------------------------------- resolve
 
 function parseArgs(argv) {
@@ -303,8 +457,6 @@ function main() {
   out.push('commit;');
   out.push('');
 
-  db.close();
-
   if (problems.length) {
     console.error('\n  Export aborted. Problems found in the source data:\n');
     for (const p of problems.slice(0, 40)) console.error(`    - ${p}`);
@@ -313,12 +465,19 @@ function main() {
     process.exit(1);
   }
 
+  const verifyPath = path.join(path.dirname(outPath), 'verify-data.sql');
+  const verifySql = buildDataVerification(db, dbPath);
+
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, out.join('\n'), 'utf8');
+  fs.writeFileSync(verifyPath, verifySql, 'utf8');
+
+  db.close();
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   console.log(`\n  Read:    ${dbPath}`);
   console.log(`  Wrote:   ${path.relative(ROOT, outPath)}`);
+  console.log(`           ${path.relative(ROOT, verifyPath)}`);
   console.log(`  Rows:    ${total}\n`);
   for (const [table, n] of Object.entries(counts)) {
     console.log(`    ${table.padEnd(24)} ${n}`);
