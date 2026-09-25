@@ -1,97 +1,175 @@
 # BookBin
 
-A small local-only desktop app for recording incoming (purchase) invoices,
-tracking inventory off of them, and producing outgoing (sales) invoices as
-PDFs. Built with Electron + SQLite, no external services, no accounts, no
-subscription.
+A desktop app for recording incoming (purchase) invoices, tracking inventory
+off of them, and producing outgoing (sales) invoices as PDFs. Electron on the
+front, Postgres (via Supabase) behind it, so several people can work in the
+same books at once.
+
+Everyone signs in. There are two kinds of account: **owners**, who can create
+and remove accounts and change roles, and **managers**, who can edit
+everything else but cannot touch accounts.
 
 ## Setup
 
 ```
 npm install
+```
+
+Then create a `.env` in the repo root (copy `.env.example`) with the values
+from your Supabase project under **Settings → API** and **Settings → Data
+API**:
+
+```
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+```
+
+`.env` is gitignored, and this repo is public. Use the **publishable** (or
+legacy anon) key — never the secret / `service_role` key. That one bypasses
+every security policy in the database; the build refuses to package it.
+
+```
+npm run config   # checks the values resolve
 npm start
 ```
 
-Your data lives in a single SQLite file at:
+## Setting up a Supabase project from scratch
+
+Run these in the SQL Editor, in order:
+
+1. `supabase/migrations/*.sql` — schema, security policies, and the functions
+   that make multi-statement operations atomic.
+2. `supabase/verify.sql` — confirms row-level security is on everywhere and
+   the security functions exist. Everything should say `PASS`.
+
+Then:
+
+3. **Authentication → Providers → Email**: turn *Enable Email provider* **on**
+   and *Allow new users to sign up* **off**. Accounts are created by owners
+   from inside the app, never by self-signup.
+4. **Authentication → Users → Add user** (tick *Auto Confirm User*), then make
+   that first account an owner — there is nobody yet who could:
+
+   ```sql
+   insert into public.profiles (id, email, role)
+   select id, email, 'owner' from auth.users where email = 'you@example.com'
+   on conflict (id) do update set role = 'owner';
+   ```
+
+5. **Deploy the Edge Function** that creates accounts:
+
+   ```
+   npx supabase functions deploy manage-users
+   ```
+
+   It holds the `service_role` key server-side, which is the only way an app
+   that users can unpack is allowed to create accounts at all.
+
+### Migrating data from the old SQLite version
+
+`scripts/export-to-supabase.js` reads a v1 `bookbin.db` and writes a
+transactional SQL file plus a verification query with the expected row counts,
+sums and totals baked in:
 
 ```
-%APPDATA%\bookbin\bookbin.db
+npm run export
 ```
 
-(created automatically on first launch). Back it up by copying that file.
-
-### If `npm install` fails to build the SQLite native module
-
-`better-sqlite3` ships prebuilt N-API binaries (win/mac/linux) directly in the
-package as of v12+, so a plain `npm install` normally needs no compiler at
-all. If you're ever on a platform/arch it didn't prebuild for and `npm start`
-errors on launch, fall back to compiling it yourself against Electron's
-headers:
-
-```
-npm install --save-dev @electron/rebuild
-npx electron-rebuild -f -w better-sqlite3
-```
-
-That requires Python and a C++ toolchain (Visual Studio Build Tools on
-Windows) — not needed in the common case above.
+Load `supabase/seed/bookbin-data.sql`, then run
+`supabase/seed/verify-data.sql`. Both files are gitignored — they contain real
+business data.
 
 ## What it does
 
-- **Items** — your catalog. Items can be marked "inventory" (stock is
-  tracked) or "non-inventory" (e.g. Shipping, a misc fee) — non-inventory
-  items appear on invoices but never affect stock counts. Each item also has
-  a manual "Adjust Stock" action (for physical-count corrections) and a
-  full history of every quantity change.
+- **Items** — your catalog. Items can be marked "inventory" (stock is tracked)
+  or "non-inventory" (e.g. Shipping, a misc fee) — non-inventory items appear
+  on invoices but never affect stock counts. Each item has a manual "Adjust
+  Stock" action for physical-count corrections, and a full history of every
+  quantity change.
 - **Vendors / Customers** — simple contact records.
-- **Incoming Invoices** — record what you bought. Saving one automatically
-  adds each inventory line's quantity to on-hand stock. Editing or deleting
-  an invoice correctly reverses its old stock effect first.
-- **Outgoing Invoices** — record what you sold. Saving one automatically
-  subtracts stock the same way. Each saved outgoing invoice has an
-  **Export PDF** button that renders a styled invoice and lets you save it
-  anywhere via the normal Save dialog.
-- **Dashboard** — low-stock warnings plus your most recent invoices of each
-  kind.
-- **Settings** — your company name/address (shown on PDF invoices),
-  invoice number prefixes/counters, and the low-stock threshold.
+- **Incoming Invoices** — record what you bought. Saving one adds each
+  inventory line's quantity to on-hand stock. Editing or deleting an invoice
+  reverses its old stock effect first, by appending compensating entries
+  rather than rewriting history.
+- **Outgoing Invoices** — record what you sold. Saving one subtracts stock the
+  same way. Each has an **Export PDF** button; a PDF exported from a "sent"
+  invoice is also kept as its attachment.
+- **Costing** — pools every incoming line that ever bought an item, gives each
+  its share of that invoice's shipping and tax, and takes a quantity-weighted
+  average. Each recalculation writes a permanent snapshot, so a price stays
+  explainable even after the invoices behind it change.
+- **Purchase Orders** — a wanted list per buying season, showing how much of
+  each item has been bought. Closing one freezes those numbers; reopening
+  makes them live again.
+- **Dashboard** — low-stock warnings and the most recent invoices of each kind.
+- **Settings** — company name, address and logo (shown on PDF invoices),
+  invoice prefixes and counters, markup percentage, low-stock threshold.
+- **Users** (owners only) — create accounts, change roles, remove accounts.
+
+Invoice attachments and the company logo live in Supabase Storage, so a file
+attached on one machine opens on another.
+
+## Security
+
+Access is enforced by the database, not the app. Every table has row-level
+security; a client holding nothing but the publishable key — which is what
+anyone who unpacks the installer has — is refused on every read and write.
+
+The app's own role check decides only what to draw. A manager who reaches the
+Users screen anyway is refused by Postgres, not by the interface.
 
 ## Releasing (both platforms, from either OS)
 
-Releases are automated via [.github/workflows/release.yml](.github/workflows/release.yml).
-Bump the version, commit, and push the tag `npm version` creates:
+Releases are automated via
+[.github/workflows/release.yml](.github/workflows/release.yml). Bump the
+version, commit, and push the tag `npm version` creates:
 
 ```
 npm version patch   # or: minor / major
 git push --follow-tags
 ```
 
-GitHub Actions then builds the Windows `.exe` (on a Windows runner) and the
-Mac `.dmg`/`.zip` (on a macOS runner) and publishes both to the GitHub Release
-for that tag — no local Mac needed, this can be run entirely from Windows.
+GitHub Actions builds the Windows `.exe` and the Mac `.dmg`/`.zip` and
+publishes both to the GitHub Release for that tag — no local Mac needed.
 
-The sidebar footer shows the installed version and checks that release feed
-on launch (and on demand via "Check for updates"). On Windows it downloads
-and installs the update in place; on Mac — only ad-hoc signed, not enough for
-a silent install — it instead opens the GitHub release page to grab the new
-`.dmg` by hand.
+**The build needs the Supabase values as repository secrets**
+(Settings → Secrets and variables → Actions): `SUPABASE_URL` and
+`SUPABASE_PUBLISHABLE_KEY`. Without them the build fails with a clear message
+rather than shipping an app that cannot connect.
+
+The sidebar footer shows the installed version and checks that release feed on
+launch. On Windows it installs the update in place; on Mac — only ad-hoc
+signed, not enough for a silent install — it opens the release page instead.
 
 ## Project layout
 
 ```
-main.js               Electron entry point, wires up IPC handlers
+main.js                Electron entry point, wires up IPC handlers
 preload.js             contextBridge surface exposed to the renderer as window.api
-db/                    SQLite schema + connection setup
-ipc/                   One module per domain (items, vendors, customers,
-                        incoming/outgoing invoices, settings, dashboard) —
-                        all DB access happens here, in the main process.
-                        updates.js is the exception — no DB, just wraps
-                        electron-updater for the sidebar's update check.
+config/supabase.js     Resolves the project URL and key (env, .env, or baked in)
+db/
+  supabase.js          The client, plus the encrypted session store
+  rest.js              Shared query helpers and numeric coercion
+  storage.js           Attachment and logo uploads/downloads
+ipc/                   One module per domain — all database access happens
+                        here, in the main process, so the renderer never holds
+                        an access token. auth.js and users.js cover sign-in and
+                        account management; updates.js wraps electron-updater.
 renderer/              Plain HTML/CSS/JS UI, no framework, no build step
   screens/             One file per screen
   invoice-template.js  Builds the printable invoice HTML (shared by PDF export)
+scripts/               Build-time config writer and the one-off SQLite export
+supabase/
+  migrations/          Schema, policies, and functions
+  functions/           Edge Functions (account creation)
 ```
 
 No bundler, no framework — every renderer file is loaded directly as a
-`<script>` tag from `index.html`, so you can open any screen file and edit
-it directly.
+`<script>` tag from `index.html`.
+
+### A note on numbers
+
+Postgres returns `numeric` columns as **strings**, to avoid handing back a
+float it cannot represent exactly. `"5" + 2` is `"52"`, so every numeric column
+is coerced through `db/rest.js` on the way out. If a total ever renders as
+concatenated digits, that is the coercion missing a column.
