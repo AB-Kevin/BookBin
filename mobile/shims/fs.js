@@ -8,10 +8,11 @@
 // sits on a disk other people and programs can read, which an app's private
 // storage on Android is not.
 //
-// The download cache (attachments, the logo) and files picked for upload are
-// different: they can be large and localStorage holds a few megabytes at
-// most, so anything under a "cache" or "picked" folder is kept in memory for
-// the life of the app instead, as are temporary files (/tmp).
+// Everything else -- downloaded attachments and the logo (db/storage.js's
+// file-cache), files picked for upload, temporary files -- is kept in memory
+// for the life of the app. Those can be large, and localStorage holds a few
+// megabytes at most; filling it would also leave no room to save a session.
+// So only the known small files persist, and anything new defaults to memory.
 //
 // Contents are stored base64-encoded so binary files survive the round trip.
 
@@ -24,8 +25,23 @@ function normalize(p) {
   return String(p).replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
+// databases.json, local-settings.json, and sessions/<id>.bin.
+function persists(p) {
+  return /\.json$/.test(p) || /\/sessions\/[^/]+$/.test(p);
+}
+
 function isCache(p) {
-  return /^\/tmp(\/|$)|\/(cache|picked)(\/|$)/.test(p);
+  return !persists(p);
+}
+
+// Versions before this kept downloaded files in localStorage too; clear them
+// out, since they only take up the room the session needs.
+try {
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith(PREFIX) && !persists(key.slice(PREFIX.length)))
+    .forEach((key) => localStorage.removeItem(key));
+} catch (err) {
+  // Storage unavailable; nothing to clean.
 }
 
 function getRaw(p) {
