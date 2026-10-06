@@ -998,6 +998,9 @@ option.new-entry { color: var(--accent); font-style: italic; }
   box-shadow: var(--shadow);
 }
 .modal.wide { width: 800px; }
+/* confirmAction / showMessage: above any modal they were opened from. */
+.dialog-layer { z-index: 110; }
+.dialog-message { white-space: pre-line; overflow-wrap: anywhere; }
 .modal h2 { font-family: var(--font-serif); font-size: 22px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 16px; }
 .modal p { line-height: 1.5; }
 

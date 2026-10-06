@@ -289,7 +289,7 @@ window.Screens.items = async function renderItems(container) {
     qs('#recalc-btn', modal).addEventListener('click', async () => {
       const result = await window.api.costing.recalculateItem(item.id);
       if (!result.ok) {
-        window.alert("This item has no incoming-invoice purchase history to calculate a cost from.");
+        await window.Helpers.showMessage("This item has no incoming-invoice purchase history to calculate a cost from.");
         return;
       }
       const idx = items.findIndex((i) => i.id === item.id);
@@ -303,7 +303,7 @@ window.Screens.items = async function renderItems(container) {
   async function onRecalculateAll() {
     const results = await window.api.costing.recalculateAll();
     const recalculated = results.filter((r) => r.ok).length;
-    window.alert(`Recalculated cost/price for ${recalculated} of ${results.length} item(s) with purchase history.`);
+    await window.Helpers.showMessage(`Recalculated cost/price for ${recalculated} of ${results.length} item(s) with purchase history.`);
     load();
   }
 

@@ -5,6 +5,7 @@
 // and for the PDF template, both of which need a real file:// URL.
 
 const { dialog, BrowserWindow } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const storage = require('../db/storage');
 const { table, unwrap, numericColumns } = require('../db/rest');
@@ -71,10 +72,33 @@ async function resolveCompanyLogo(company) {
 function registerSettings(ipcMain) {
   async function withLogoUrl(row) {
     if (!row) return row;
-    const settings = coerceSettings(row);
+    const settings = await adoptLegacyLogo(coerceSettings(row));
     const absPath = await resolveLogoPath(settings.company_logo_path);
     if (!absPath) return { ...settings, company_logo_url: null };
     return { ...settings, company_logo_url: `file://${absPath.replace(/\\/g, '/')}` };
+  }
+
+  // A logo chosen before files moved into storage is still an absolute path on
+  // the computer it was picked on, which no other device can open. When that
+  // computer sees it, it uploads the file and records the object instead, so
+  // the phone and every other machine find it from then on.
+  //
+  // Best-effort, like the download: the logo still shows here from disk if
+  // this fails, and the next look tries again.
+  async function adoptLegacyLogo(settings) {
+    const stored = settings.company_logo_path;
+    if (!stored || storage.isStoragePath(stored) || !path.isAbsolute(stored) || !fs.existsSync(stored)) {
+      return settings;
+    }
+    let objectPath = null;
+    try {
+      objectPath = await storage.uploadFile('logo', stored);
+      return coerceSettings(await updateSettings({ company_logo_path: objectPath }));
+    } catch (err) {
+      console.error('BookBin: could not upload the logo —', err.message);
+      if (objectPath) await storage.removeFile(objectPath);
+      return settings;
+    }
   }
 
   async function getSettings() {

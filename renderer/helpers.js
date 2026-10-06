@@ -97,8 +97,55 @@ function hideModal() {
   root.innerHTML = '';
 }
 
-async function confirmAction(message) {
-  return window.confirm(message);
+// In-page stand-ins for window.confirm and window.alert. The native ones leave
+// an Electron window on Windows unable to take typing once they close, until
+// the window is clicked away from and back -- which reads as every text field
+// in the app having stopped working. Each prompt gets its own layer above
+// #modal-root, so one can open over a modal without replacing it.
+function inPageDialog(message, buttons) {
+  return new Promise((resolve) => {
+    const returnFocus = document.activeElement;
+    const layer = document.createElement('div');
+    layer.className = 'modal-backdrop dialog-layer';
+    layer.innerHTML = `
+      <div class="modal" role="alertdialog" aria-modal="true">
+        <p class="dialog-message">${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          ${buttons.map((b, i) => `<button type="button" class="btn${b.primary ? ' primary' : ''}" data-choice="${i}">${escapeHtml(b.label)}</button>`).join('')}
+        </div>
+      </div>
+    `;
+    const cancelValue = buttons.find((b) => b.cancel)?.value;
+    const finish = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      layer.remove();
+      if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+      resolve(value);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finish(cancelValue); }
+    };
+    layer.querySelectorAll('[data-choice]').forEach((btn) =>
+      btn.addEventListener('click', () => finish(buttons[Number(btn.dataset.choice)].value))
+    );
+    layer.addEventListener('mousedown', (e) => {
+      if (e.target === layer) finish(cancelValue);
+    });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(layer);
+    layer.querySelector('.btn.primary').focus();
+  });
+}
+
+function confirmAction(message) {
+  return inPageDialog(message, [
+    { label: 'Cancel', value: false, cancel: true },
+    { label: 'OK', value: true, primary: true },
+  ]);
+}
+
+function showMessage(message) {
+  return inPageDialog(message, [{ label: 'OK', value: undefined, primary: true, cancel: true }]);
 }
 
 // A screen with unsaved work registers a guard ({ isDirty, confirmLeave })
@@ -221,6 +268,7 @@ window.Helpers = {
   showModal,
   hideModal,
   confirmAction,
+  showMessage,
   navigate,
   setNavigationGuard,
   clearNavigationGuard,

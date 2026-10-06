@@ -92,13 +92,13 @@ async function exportPdf(id) {
   if (result.canceled) return result;
   // `shown`: the PDF was already opened for the person (the Android app),
   // so there is nothing to tell them.
-  if (result.ok && !result.shown) window.alert(result.message || `Saved PDF to:\n${result.filePath}`);
-  else if (!result.ok) window.alert('Could not export PDF.');
+  if (result.ok && !result.shown) await window.Helpers.showMessage(result.message || `Saved PDF to:\n${result.filePath}`);
+  else if (!result.ok) await window.Helpers.showMessage('Could not export PDF.');
   return result;
 }
 
 async function renderForm(container, invoiceId) {
-  const { escapeHtml, formatMoney, todayIso, qs, qsa } = window.Helpers;
+  const { escapeHtml, formatMoney, todayIso, confirmAction, qs, qsa } = window.Helpers;
   const isEdit = Boolean(invoiceId);
 
   const [customers, items, invoice, allInvoices] = await Promise.all([
@@ -177,7 +177,11 @@ async function renderForm(container, invoiceId) {
           ${(invoice?.lines?.length ? invoice.lines : [null]).map(lineRowHtml).join('')}
         </tbody>
       </table>
-      <button type="button" class="btn" id="add-line">+ Add Line</button>
+      <div class="header-actions">
+        <button type="button" class="btn" id="add-line">+ Add Line</button>
+        <button type="button" class="btn" id="autofill-lines">${window.Helpers.icon('inventory_2')}Auto-fill from Stock</button>
+        <button type="button" class="btn danger" id="clear-lines">Clear Invoice</button>
+      </div>
 
       <div class="totals">
         <strong>Total: <span id="grand-total">${formatMoney(invoice?.total || 0)}</span></strong>
@@ -414,6 +418,123 @@ async function renderForm(container, invoiceId) {
     tbody.insertAdjacentHTML('beforeend', lineRowHtml(null));
     wireRow(tbody.lastElementChild);
     markDirty();
+  });
+
+  function replaceLines(lines) {
+    tbody.innerHTML = (lines.length ? lines : [null]).map(lineRowHtml).join('');
+    qsa('.line-row', tbody).forEach(wireRow);
+    recalcGrandTotal();
+    markDirty();
+  }
+
+  function hasLineContent() {
+    return qsa('.line-row', tbody).some((row) =>
+      qs('.line-item', row).value || qs('.line-desc', row).value.trim()
+    );
+  }
+
+  qs('#clear-lines', container).addEventListener('click', async () => {
+    if (hasLineContent() && !(await confirmAction('Remove every line from this invoice?'))) return;
+    replaceLines([]);
+  });
+
+  // Fills the invoice with everything in stock: items on the chosen purchase
+  // order (its lines, then its vendor-order invoices) in the order the PO
+  // screen shows them, preceded by in-stock items the PO doesn't have.
+  // Nothing touches stock until the invoice is saved.
+  qs('#autofill-lines', container).addEventListener('click', async () => {
+    const { showModal, hideModal } = window.Helpers;
+    const [orders, freshItems, saved] = await Promise.all([
+      window.api.purchaseOrders.list(),
+      window.api.items.list(),
+      isEdit ? window.api.outgoingInvoices.get(invoiceId) : Promise.resolve(null),
+    ]);
+    // Keep the item dropdowns in step with the quantities used below.
+    items.splice(0, items.length, ...freshItems);
+
+    // A saved invoice has already taken its own lines out of stock, and
+    // auto-fill replaces those lines, so they count as available again.
+    const available = new Map();
+    for (const item of items) {
+      if (item.is_inventory) available.set(item.id, Number(item.quantity_on_hand || 0));
+    }
+    for (const line of saved?.lines || []) {
+      if (available.has(line.item_id)) {
+        available.set(line.item_id, available.get(line.item_id) + Number(line.quantity || 0));
+      }
+    }
+    const inStock = items.filter((i) => available.get(i.id) > 0);
+    if (!inStock.length) {
+      await window.Helpers.showMessage('Nothing is in stock to put on the invoice.');
+      return;
+    }
+
+    // Newest open order first, which is the likely one; closed orders after.
+    const sortedOrders = [...orders].sort((a, b) =>
+      (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1)
+      || String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id
+    );
+    const lineCount = qsa('.line-row', tbody).length;
+
+    const modal = showModal(`
+      <h2>Auto-fill from Stock</h2>
+      <form id="autofill-form">
+        <p>Adds all ${inStock.length} in-stock item${inStock.length === 1 ? '' : 's'} at their full quantity on hand.
+          Anything not on the purchase order goes first, alphabetically; then the PO's own lines in order,
+          then the lines of each vendor-order invoice, vendor by vendor, oldest invoice first.</p>
+        <label>Purchase Order
+          <select name="purchase_order_id">
+            ${sortedOrders.map((po) => `<option value="${po.id}">${escapeHtml(po.name)}${po.status === 'closed' ? ' (closed)' : ''}</option>`).join('')}
+            <option value="">(none — alphabetical)</option>
+          </select>
+        </label>
+        ${hasLineContent() ? `<p class="muted small">This replaces the ${lineCount} line${lineCount === 1 ? '' : 's'} already on the invoice.</p>` : ''}
+        <div class="modal-actions">
+          <button type="button" class="btn" id="cancel-btn">Cancel</button>
+          <button type="submit" class="btn primary">Auto-fill</button>
+        </div>
+      </form>
+    `);
+    qs('#cancel-btn', modal).addEventListener('click', hideModal);
+    qs('#autofill-form', modal).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const poId = Number(new FormData(e.target).get('purchase_order_id')) || null;
+      const [poLines, vendorOrders] = poId
+        ? await Promise.all([
+            window.api.purchaseOrderItems.list(poId),
+            // A database without the vendor-orders tables still auto-fills
+            // from the PO's own lines.
+            window.api.purchaseOrderVendors.list(poId).catch(() => []),
+          ])
+        : [[], []];
+      // Vendors in the order the PO screen lists them, each one's invoices
+      // oldest first, as they appear there too.
+      const vendorInvoices = await Promise.all(
+        vendorOrders.flatMap((order) => order.invoices).map((inv) => window.api.incomingInvoices.get(inv.id))
+      );
+
+      // The PO's lines in PO order, then every vendor invoice's lines in
+      // invoice order. An item listed in more than one place goes where it
+      // first appears.
+      const inStockIds = new Set(inStock.map((i) => i.id));
+      const poOrder = [...new Set([
+        ...poLines.map((l) => l.item_id),
+        ...vendorInvoices.flatMap((inv) => inv?.lines || []).map((l) => l.item_id),
+      ].filter((id) => inStockIds.has(id)))];
+      const onPo = new Set(poOrder);
+      const ordered = [
+        ...inStock.filter((i) => !onPo.has(i.id)), // already alphabetical
+        ...poOrder.map((id) => inStock.find((i) => i.id === id)),
+      ];
+
+      replaceLines(ordered.map((item) => ({
+        item_id: item.id,
+        description: item.name,
+        quantity: available.get(item.id),
+        unit_price: item.default_price,
+      })));
+      hideModal();
+    });
   });
 
   async function saveInvoice() {
