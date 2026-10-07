@@ -406,4 +406,9 @@ function registerPurchaseOrderVendors(ipcMain) {
   });
 }
 
-module.exports = { registerPurchaseOrders, registerPurchaseOrderItems, registerPurchaseOrderVendors };
+module.exports = {
+  registerPurchaseOrders,
+  registerPurchaseOrderItems,
+  registerPurchaseOrderVendors,
+  boughtQuantities, // the dashboard's open-order card counts the same way
+};

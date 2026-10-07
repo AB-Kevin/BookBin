@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('api', {
     setPassword: (userId, password) => ipcRenderer.invoke('users:setPassword', userId, password),
   },
   dashboard: {
-    summary: () => ipcRenderer.invoke('dashboard:summary'),
+    card: (id) => ipcRenderer.invoke('dashboard:card', id),
   },
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),

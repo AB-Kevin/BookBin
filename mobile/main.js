@@ -9,7 +9,7 @@
 // in between.
 //
 // Registered below in the same way main.js does it. Left out on purpose:
-//   updates   electron-updater cannot install an APK; stubbed instead
+//   updates   electron-updater cannot install an APK; replaced by a GitHub check below
 //   setup     creates tables and deploys functions from files on disk;
 //             new databases are set up from the desktop app
 //   activity  the desktop's close-when-idle timer; Android manages that itself
@@ -90,10 +90,44 @@ ipcMain.wrapResult('outgoingInvoices:exportPdf', async (result) => {
   return error ? { ...result, message: `The PDF was made, but could not be opened: ${error}` } : { ...result, shown: true };
 });
 
-// Updates come as a new APK from the GitHub release, installed by hand, so
-// the sidebar shows the version and nothing to check.
+// Updates come as a new APK from the GitHub release, installed by hand. The
+// check reads the latest release from GitHub's API (which allows the web
+// view's cross-origin fetch), and a newer one is offered the way the Mac
+// build offers its: "Get update" opens the release page to download from.
+// A release only counts once its APK is attached, since the Android build can
+// fail or finish later than the desktop ones.
+const LATEST_RELEASE_API = 'https://api.github.com/repos/AB-Kevin/BookBin/releases/latest';
+let releasePage = 'https://github.com/AB-Kevin/BookBin/releases/latest';
+
+function isNewer(latest, current) {
+  const a = latest.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  }
+  return false;
+}
+
 ipcMain.handle('updates:getVersion', () => app.getVersion());
-ipcMain.handle('updates:check', () => {});
+ipcMain.handle('updates:check', async () => {
+  const send = (status) => mainWindow.webContents.send('updates:status', status);
+  try {
+    const response = await fetch(LATEST_RELEASE_API, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+    const release = await response.json();
+    const version = String(release.tag_name || '').replace(/^v/, '');
+    const hasApk = (release.assets || []).some((asset) => asset.name.endsWith('.apk'));
+    if (version && hasApk && isNewer(version, app.getVersion())) {
+      releasePage = release.html_url || releasePage;
+      send({ state: 'available-manual', version });
+    } else {
+      send({ state: 'not-available' });
+    }
+  } catch (err) {
+    send({ state: 'error', message: err.message || String(err) });
+  }
+});
+ipcMain.handle('updates:openReleasesPage', () => shell.openExternal(releasePage));
 
 // The page follows the phone's light/dark setting through CSS; there is no
 // native title bar to keep in step.

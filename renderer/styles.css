@@ -560,6 +560,71 @@ h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
 }
 
 .stat-value.warn { color: var(--warn); }
+.stat-of { font-size: 15px; color: var(--muted); }
+.stat-note { font-size: 12px; color: var(--muted); }
+
+/* ------------------------------------------------------------- dashboard */
+
+/* Cards in the order chosen under Customize. A wide card takes the whole row;
+   the rest sit side by side where there is room. */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.dashboard-grid > .card { margin-bottom: 0; }
+.dashboard-grid > .card.wide { grid-column: 1 / -1; }
+
+/* A strip of figures inside a card, under its header, edge to edge. The
+   card clips .stat's outer rules just as it does for .stats-row. */
+.card-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0 -20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.card-stats + .muted { margin: 16px 0 0; }
+.card-foot { margin: 16px 0 0; }
+
+/* Customize: one row per card, with its show box and move buttons. */
+.dash-editor {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.dash-editor li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dash-editor li:last-child { border-bottom: none; }
+
+form .dash-editor label.checkbox {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  gap: 10px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.dash-editor label .icon { font-size: 20px; color: var(--muted); }
+.dash-editor-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dash-editor-title { font-size: 14px; font-weight: 500; }
+.dash-editor-desc { font-size: 12px; font-weight: 400; color: var(--muted); line-height: 1.35; }
+.dash-editor li.off .dash-editor-title,
+.dash-editor li.off .icon { opacity: 0.55; }
+
+.modal-actions .push-left { margin-right: auto; }
 
 /* ----------------------------------------------------------------- tables */
 
@@ -669,6 +734,7 @@ h1 .badge { font-family: var(--font-sans); letter-spacing: 0; margin-left: 6px; 
 .badge.status-draft { background: transparent; border: 1px dashed var(--line2); }
 .badge.status-closed { background: var(--hover); color: var(--muted); }
 .badge.danger { background: var(--danger-soft); color: var(--danger); text-transform: none; }
+.badge.count { background: var(--warn-soft); color: var(--warn); text-transform: none; }
 
 /* Received / Paid toggles on the invoice list. */
 .pill {
@@ -1400,6 +1466,10 @@ body.signed-out #banner-root { display: none; }
   .card-head, .card-toolbar { margin: -16px -16px 0; }
   .card-head { padding: 14px 16px; }
   .grid-2 { grid-template-columns: 1fr; gap: 16px; }
+  .dashboard-grid { gap: 16px; }
+  .card-stats { margin: 0 -16px; grid-template-columns: repeat(2, 1fr); }
+  .card-stats .stat { padding: 14px 16px; }
+  .card-stats .stat-value { font-size: 20px; }
 
   .card-toolbar .search-field { max-width: none; flex-basis: 100%; }
   .card-toolbar select { flex: 1; }
