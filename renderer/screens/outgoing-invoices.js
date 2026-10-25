@@ -560,9 +560,19 @@ async function renderForm(container, invoiceId) {
     if (pendingAttachmentPath) payload.attachment_source_path = pendingAttachmentPath;
     if (attachmentRemoved) payload.remove_attachment = true;
 
-    const saved = isEdit
-      ? await window.api.outgoingInvoices.update(invoiceId, payload)
-      : await window.api.outgoingInvoices.create(payload);
+    // Without this, a failed save rejects into nowhere and the button simply
+    // appears to do nothing.
+    let saved;
+    try {
+      saved = isEdit
+        ? await window.api.outgoingInvoices.update(invoiceId, payload)
+        : await window.api.outgoingInvoices.create(payload);
+    } catch (err) {
+      console.error(err);
+      const message = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+      await window.Helpers.showMessage(`Could not save the invoice:\n${message}`);
+      return { ok: false };
+    }
     dirty = false;
     return { ok: true, invoice: saved };
   }
