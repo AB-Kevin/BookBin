@@ -69,10 +69,7 @@ async function renderList(container) {
       btn.addEventListener('click', () => window.api.outgoingInvoices.openAttachment(Number(btn.dataset.viewAttachment)))
     );
     qsa('[data-pdf]', container).forEach((btn) =>
-      btn.addEventListener('click', async () => {
-        await exportPdf(Number(btn.dataset.pdf));
-        load(); // pdf export attaches the generated file, so refresh to show the View button
-      })
+      btn.addEventListener('click', () => exportPdf(Number(btn.dataset.pdf)))
     );
     qsa('[data-delete]', container).forEach((btn) =>
       btn.addEventListener('click', async () => {
@@ -90,10 +87,17 @@ async function renderList(container) {
 async function exportPdf(id) {
   const result = await window.api.outgoingInvoices.exportPdf(id);
   if (result.canceled) return result;
+  if (!result.ok) {
+    await window.Helpers.showMessage('Could not export PDF.');
+    return result;
+  }
   // `shown`: the PDF was already opened for the person (the Android app),
-  // so there is nothing to tell them.
-  if (result.ok && !result.shown) await window.Helpers.showMessage(result.message || `Saved PDF to:\n${result.filePath}`);
-  else if (!result.ok) await window.Helpers.showMessage('Could not export PDF.');
+  // so there is no saved location to tell them -- but a `warning` that it
+  // was not kept with the invoice still needs saying there.
+  const parts = [];
+  if (!result.shown) parts.push(result.message || `Saved PDF to:\n${result.filePath}`);
+  if (result.warning) parts.push(result.warning);
+  if (parts.length) await window.Helpers.showMessage(parts.join('\n\n'));
   return result;
 }
 
@@ -194,6 +198,13 @@ async function renderForm(container, invoiceId) {
         <div class="attachment-row" id="attachment-row"></div>
       </div>
 
+      ${isEdit ? `
+        <div class="form-field">
+          <span class="field-label">Exported PDF</span>
+          <div class="attachment-row" id="pdf-row"></div>
+        </div>
+      ` : ''}
+
       <div class="modal-actions">
         <button type="button" class="btn" id="cancel-btn">Cancel</button>
         ${isEdit ? '<button type="button" class="btn" id="pdf-btn">Export PDF</button>' : ''}
@@ -275,6 +286,23 @@ async function renderForm(container, invoiceId) {
     });
   }
   renderAttachmentRow();
+
+  // The latest export, kept apart from the attachment above. It is made by
+  // Export PDF and replaced by the next one, so it is only ever viewed here.
+  function renderPdfRow() {
+    const row = qs('#pdf-row', container);
+    if (!row) return;
+    if (invoice?.pdf_name) {
+      row.innerHTML = `
+        <span class="attachment-name">${window.Helpers.icon('picture_as_pdf')} ${escapeHtml(invoice.pdf_name)}</span>
+        <button type="button" class="btn small" id="view-pdf">View</button>
+      `;
+      qs('#view-pdf', row).addEventListener('click', () => window.api.outgoingInvoices.openPdf(invoiceId));
+    } else {
+      row.innerHTML = '<span class="muted small">Not exported yet. Export PDF keeps a copy here.</span>';
+    }
+  }
+  renderPdfRow();
 
   const customerSelect = qs('select[name="customer_id"]', container);
   let lastCustomerValue = customerSelect.value;
@@ -602,12 +630,9 @@ async function renderForm(container, invoiceId) {
   if (isEdit) qs('#pdf-btn', container).addEventListener('click', async () => {
     const result = await exportPdf(invoiceId);
     if (result?.ok && result.invoice) {
-      invoice.attachment_path = result.invoice.attachment_path;
-      invoice.attachment_name = result.invoice.attachment_name;
-      pendingAttachmentPath = null;
-      pendingAttachmentName = null;
-      attachmentRemoved = false;
-      renderAttachmentRow();
+      invoice.pdf_path = result.invoice.pdf_path;
+      invoice.pdf_name = result.invoice.pdf_name;
+      renderPdfRow();
     }
   });
 

@@ -5,7 +5,9 @@
 // REST client cannot span statements in a transaction. Selling reduces stock
 // rather than adding to it, and the total carries no shipping.
 //
-// Attachments live in Supabase Storage, handled by ipc/attachments.js.
+// Attachments live in Supabase Storage, handled by ipc/attachments.js. An
+// invoice has two: the file attached by hand (attachment_*), and the PDF its
+// latest export made (pdf_*), which each export replaces.
 
 const { BrowserWindow, dialog } = require('electron');
 const fs = require('fs');
@@ -21,9 +23,14 @@ const ATTACHMENT_FILTERS = [
   { name: 'Documents', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'] },
 ];
 
-const INVOICE_COLUMNS =
-  'id, customer_id, invoice_number, invoice_date, notes, total, status, ' +
-  'attachment_path, attachment_name, created_at';
+// Every column rather than a list, so a database that has not had pdf_path
+// and pdf_name added yet still loads its invoices; those just come back
+// missing until it is updated.
+const INVOICE_COLUMNS = '*';
+
+const MISSING_PDF_COLUMNS =
+  'It was not kept with the invoice: this database has not been updated for exported PDFs yet. ' +
+  'An owner can update it from the start screen with "Set up a new one", choosing this database\'s project.';
 
 const LINE_COLUMNS = 'id, invoice_id, item_id, description, quantity, unit_price, line_total';
 
@@ -126,13 +133,14 @@ module.exports = function registerOutgoingInvoices(ipcMain) {
   ipcMain.handle('outgoingInvoices:update', (_e, id, data) => save(id, data));
 
   ipcMain.handle('outgoingInvoices:delete', async (_e, id) => {
-    // Read the filename before the row goes, or the file is orphaned on disk.
+    // Read the filenames before the row goes, or the files are orphaned.
     const current = unwrap(
-      await table('outgoing_invoices').select('attachment_path').eq('id', id).maybeSingle()
+      await table('outgoing_invoices').select('*').eq('id', id).maybeSingle()
     );
     const { error } = await getSupabase().rpc('delete_outgoing_invoice', { p_id: id });
     unwrap({ data: null, error });
     await attachments.remove(current && current.attachment_path);
+    await attachments.remove(current && current.pdf_path);
     return { ok: true };
   });
 
@@ -152,6 +160,13 @@ module.exports = function registerOutgoingInvoices(ipcMain) {
       await table('outgoing_invoices').select('attachment_path').eq('id', id).maybeSingle()
     );
     return attachments.open(invoice && invoice.attachment_path);
+  });
+
+  ipcMain.handle('outgoingInvoices:openPdf', async (_e, id) => {
+    const invoice = unwrap(
+      await table('outgoing_invoices').select('*').eq('id', id).maybeSingle()
+    );
+    return attachments.open(invoice && invoice.pdf_path);
   });
 
   ipcMain.handle('outgoingInvoices:exportPdf', async (event, id) => {
@@ -179,15 +194,21 @@ module.exports = function registerOutgoingInvoices(ipcMain) {
       if (canceled || !filePath) return { ok: false, canceled: true };
 
       fs.writeFileSync(filePath, pdfBuffer);
-      // Only a "sent" invoice represents a PDF that actually went out — a
-      // draft export is just a preview, so it shouldn't overwrite whatever
-      // attachment (or lack of one) the invoice already has.
-      if (invoice.status === 'sent') {
-        const stored = await attachments.storeGenerated(
-          invoice, pdfBuffer, invoice.invoice_number
-        );
-        unwrap(await table('outgoing_invoices').update(stored).eq('id', id));
+      // Every export is kept with the invoice, whatever its status, replacing
+      // the previous export so the invoice always carries its latest PDF. The
+      // file attached by hand is a separate column and is left alone. The old
+      // PDF goes only once the new one is recorded, so a failure part-way
+      // never leaves the invoice pointing at a deleted file.
+      const stored = await attachments.storeGenerated(pdfBuffer, invoice.invoice_number);
+      const { error } = await table('outgoing_invoices')
+        .update({ pdf_path: stored.path, pdf_name: stored.name })
+        .eq('id', id);
+      if (error) {
+        await attachments.remove(stored.path);
+        if (!/pdf_path|pdf_name/.test(error.message || '')) unwrap({ data: null, error });
+        return { ok: true, filePath, warning: MISSING_PDF_COLUMNS };
       }
+      await attachments.remove(invoice.pdf_path);
       return { ok: true, filePath, invoice: await getFullInvoice(id) };
     } finally {
       pdfWindow.destroy();

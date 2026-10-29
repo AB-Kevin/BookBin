@@ -52,11 +52,14 @@ module.exports = function createAttachments(kind) {
     };
   }
 
-  /** Stores bytes already in memory (the generated invoice PDF). */
-  async function storeGenerated(current, buffer, displayName) {
+  /**
+   * Stores bytes already in memory (the generated invoice PDF). It goes in
+   * its own column rather than the attachment, so the caller records it and
+   * removes the one it replaces.
+   */
+  async function storeGenerated(buffer, displayName) {
     const objectPath = await storage.uploadBuffer(kind, buffer, '.pdf');
-    await remove(current && current.attachment_path);
-    return { attachment_path: objectPath, attachment_name: `${displayName || 'invoice'}.pdf` };
+    return { path: objectPath, name: `${displayName || 'invoice'}.pdf` };
   }
 
   /** Opens an attachment in whatever the OS uses for that file type. */

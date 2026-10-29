@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
     exportPdf: (id) => ipcRenderer.invoke('outgoingInvoices:exportPdf', id),
     chooseAttachment: () => ipcRenderer.invoke('outgoingInvoices:chooseAttachment'),
     openAttachment: (id) => ipcRenderer.invoke('outgoingInvoices:openAttachment', id),
+    openPdf: (id) => ipcRenderer.invoke('outgoingInvoices:openPdf', id),
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

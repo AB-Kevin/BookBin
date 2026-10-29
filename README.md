@@ -109,8 +109,8 @@ profile.
   reverses its old stock effect first, by appending compensating entries
   rather than rewriting history.
 - **Outgoing Invoices** — record what you sold. Saving one subtracts stock the
-  same way. Each has an **Export PDF** button; a PDF exported from a "sent"
-  invoice is also kept as its attachment.
+  same way. Each has an **Export PDF** button, and the latest exported PDF is
+  kept with the invoice, separate from any file you attach yourself.
 - **Costing** — pools every incoming line that ever bought an item, gives each
   its share of that invoice's shipping and tax, and takes a quantity-weighted
   average. Each recalculation writes a permanent snapshot, so a price stays
